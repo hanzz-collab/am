@@ -1,147 +1,130 @@
-const API_URL =
-  'https://anita-studio.netlify.app/.netlify/functions/amprem';
-
-const ALLOWED_ACTIONS = new Set([
-  'send-magiclink',
-  'verify-account'
-]);
+const SATRIAM_BASE = 'https://satriam.satriadeveloperz.workers.dev';
 
 exports.handler = async (event) => {
   const headers = {
-    'Access-Control-Allow-Origin':
-      process.env.ALLOWED_ORIGIN || '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Content-Type': 'application/json',
-    'Cache-Control': 'no-store'
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS'
   };
 
-  const respond = (statusCode, payload) => ({
+  const response = (statusCode, data) => ({
     statusCode,
     headers,
-    body: JSON.stringify(payload)
+    body: JSON.stringify(data)
   });
 
   if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 204,
-      headers,
-      body: ''
-    };
+    return response(200, { success: true });
   }
 
   if (event.httpMethod !== 'POST') {
-    return respond(405, {
+    return response(405, {
       success: false,
-      message: 'Method not allowed.'
+      message: 'Method tidak diizinkan.'
     });
   }
-
-  let body;
 
   try {
-    body = JSON.parse(event.body || '{}');
-  } catch {
-    return respond(400, {
-      success: false,
-      message: 'Request body bukan JSON valid.'
-    });
-  }
+    const body = JSON.parse(event.body || '{}');
+    const { action, email, rawLink } = body;
 
-  const { action, email, rawLink } = body;
-
-  if (!ALLOWED_ACTIONS.has(action)) {
-    return respond(400, {
-      success: false,
-      message: 'Action tidak didukung.'
-    });
-  }
-
-  if (
-    typeof email !== 'string' ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
-  ) {
-    return respond(400, {
-      success: false,
-      message: 'Alamat email tidak valid.'
-    });
-  }
-
-  if (action === 'verify-account') {
-    if (
-      typeof rawLink !== 'string' ||
-      rawLink.length > 4096
-    ) {
-      return respond(400, {
+    if (!email || typeof email !== 'string') {
+      return response(400, {
         success: false,
-        message: 'Tautan verifikasi tidak valid.'
+        message: 'Email tidak valid.'
       });
     }
 
-    try {
-      const parsed = new URL(rawLink);
+    let endpoint;
+    let payload;
 
-      if (parsed.protocol !== 'https:') {
-        throw new Error('Invalid protocol');
+    if (action === 'send-magiclink') {
+      endpoint = '/api/satriam/send-link';
+      payload = { email: email.trim() };
+    } else if (action === 'verify-account') {
+      if (!rawLink || typeof rawLink !== 'string') {
+        return response(400, {
+          success: false,
+          message: 'Magic link tidak ditemukan.'
+        });
       }
-    } catch {
-      return respond(400, {
+
+      let parsedLink;
+
+      try {
+        parsedLink = new URL(rawLink);
+      } catch {
+        return response(400, {
+          success: false,
+          message: 'Format magic link tidak valid.'
+        });
+      }
+
+      if (parsedLink.protocol !== 'https:') {
+        return response(400, {
+          success: false,
+          message: 'Magic link harus menggunakan HTTPS.'
+        });
+      }
+
+      endpoint = '/api/satriam/verify-link';
+      payload = {
+        email: email.trim(),
+        magicLink: rawLink.trim()
+      };
+    } else {
+      return response(400, {
         success: false,
-        message: 'Tautan harus berupa URL HTTPS yang valid.'
+        message: 'Action tidak dikenal.'
       });
     }
-  }
 
-  try {
-    const payload = {
-      action,
-      email: email.trim()
-    };
-
-    if (action === 'verify-account') {
-      payload.rawLink = rawLink;
-    }
-
-    const upstream = await fetch(API_URL, {
+    const upstream = await fetch(`${SATRIAM_BASE}${endpoint}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json'
       },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(30000)
+      signal: AbortSignal.timeout(25000)
     });
 
-    const result = await upstream.json().catch(() => ({}));
+    const rawResult = await upstream.text();
 
-    if (!upstream.ok || result.success !== true) {
-      return respond(
-        upstream.status >= 400 ? upstream.status : 502,
-        {
-          success: false,
-          message:
-            typeof result.message === 'string'
-              ? result.message
-              : 'Permintaan gagal diproses.'
-        }
-      );
+    let result;
+
+    try {
+      result = JSON.parse(rawResult);
+    } catch {
+      result = { message: rawResult };
     }
 
-    return respond(200, {
+    if (!upstream.ok || result.success === false || result.ok === false) {
+      return response(upstream.status || 502, {
+        success: false,
+        message: result.message || 'Verifikasi dari Satriam gagal.'
+      });
+    }
+
+    return response(200, {
       success: true,
-      message:
-        result.message ||
-        (action === 'send-magiclink'
-          ? 'Magic link berhasil dikirim.'
-          : 'Verifikasi berhasil.')
+      message: result.message || (
+        action === 'send-magiclink'
+          ? 'Permintaan magic link berhasil dikirim.'
+          : 'Permintaan verifikasi berhasil diproses.'
+      ),
+      data: result.data ?? null
     });
 
   } catch (error) {
-    console.error('AMPREM ERROR:', error.message);
+    console.error('[AMPREM SATRIAM]', error);
 
-    return respond(502, {
+    return response(502, {
       success: false,
-      message: 'Tidak dapat menghubungi server API.'
+      message: error.name === 'TimeoutError'
+        ? 'Server Satriam timeout.'
+        : 'Gagal menghubungi server verifikasi.'
     });
   }
 };
