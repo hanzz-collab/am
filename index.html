@@ -152,27 +152,52 @@
       const finalEmail = document.getElementById('finalEmail');
       const modalEmail = document.getElementById('modalPremiumEmail');
       const step3 = document.getElementById('step3');
+      const restartButton = document.getElementById('btnRestart');
       let successWasShown = false;
 
-      continueButton?.addEventListener('click', () => welcome?.classList.add('is-hidden'));
-      closeButton?.addEventListener('click', () => success?.classList.add('is-hidden'));
-      anotherButton?.addEventListener('click', () => {
+      const showSuccess = () => {
+        const email = finalEmail?.textContent?.trim() || '—';
+        if (modalEmail) modalEmail.textContent = email;
+        success?.removeAttribute('hidden');
+        success?.classList.remove('is-hidden');
+        successWasShown = true;
+      };
+
+      const hideSuccess = () => {
         success?.classList.add('is-hidden');
-        document.getElementById('btnRestart')?.click();
-        successWasShown = false;
+        success?.setAttribute('hidden', '');
+      };
+
+      const syncSuccess = () => {
+        const isComplete = step3?.classList.contains('active');
+        if (isComplete && !successWasShown) showSuccess();
+        if (!isComplete) {
+          successWasShown = false;
+          hideSuccess();
+        }
+      };
+
+      continueButton?.addEventListener('click', () => {
+        welcome?.classList.add('is-hidden');
+        welcome?.setAttribute('aria-hidden', 'true');
       });
 
-      if (step3 && success) {
-        const observer = new MutationObserver(() => {
-          if (step3.classList.contains('active') && !successWasShown) {
-            const email = finalEmail?.textContent?.trim() || '—';
-            if (modalEmail) modalEmail.textContent = email;
-            success.classList.remove('is-hidden');
-            successWasShown = true;
-          }
-          if (!step3.classList.contains('active')) successWasShown = false;
+      closeButton?.addEventListener('click', hideSuccess);
+
+      anotherButton?.addEventListener('click', () => {
+        hideSuccess();
+        successWasShown = false;
+        restartButton?.click();
+      });
+
+      if (step3) {
+        const observer = new MutationObserver(syncSuccess);
+        observer.observe(step3, {
+          attributes: true,
+          attributeFilter: ['class']
         });
-        observer.observe(step3, { attributes: true, attributeFilter: ['class'] });
+        // Periksa juga kondisi awal, bukan hanya perubahan setelah observer aktif.
+        syncSuccess();
       }
     })();
   </script>
