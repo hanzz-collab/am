@@ -1,396 +1,602 @@
+
 (() => {
   "use strict";
 
-  const API = "/.netlify/functions/amprem";
-  const TIMEOUT_MS = 20000;
+  const API_URL = "/.netlify/functions/amprem";
+  const REQUEST_TIMEOUT = 25000;
+
   const $ = (id) => document.getElementById(id);
-  const panels = { 1: $("step1"), 2: $("step2"), 3: $("step3") };
-  const stepItems = [...document.querySelectorAll(".progress-step")];
-  const rules = [...document.querySelectorAll(".progress-rule")];
 
-  let pendingEmail = "";
-
-  // Status akses hanya tersimpan di memori halaman.
-  // Refresh atau halaman baru akan otomatis mengembalikannya ke false.
+  // Status akses hanya disimpan di memori.
+  // Refresh halaman akan mengatur ulang nilainya menjadi false.
   let isUnlocked = false;
+  let pendingEmail = "";
+  let successWasShown = false;
+
+  // =========================================
+  // DEVICE ID
+  // =========================================
 
   function getDeviceId() {
-    const key = "amprem_device_id_v1";
-    let id = localStorage.getItem(key);
+    const storageKey = "amprem_device_id_v1";
 
-    if (!id) {
-      const bytes = new Uint8Array(32);
-      crypto.getRandomValues(bytes);
-      id = Array.from(bytes, (byte) =>
-        byte.toString(16).padStart(2, "0")
-      ).join("");
+    try {
+      let deviceId = localStorage.getItem(storageKey);
 
-      localStorage.setItem(key, id);
-    }
+      if (!deviceId) {
+        deviceId = (
+          "amprem-" +
+          crypto.randomUUID() +
+          "-" +
+          crypto.randomUUID()
+        );
 
-    return id;
-  }
+        localStorage.setItem(storageKey, deviceId);
+      }
 
-  const deviceId = getDeviceId();
-
-  // Paksa halaman meminta PIN setiap kali JavaScript dimuat ulang.
-  function showPinGate() {
-    isUnlocked = false;
-
-    $("accessPinModal").classList.remove("is-hidden");
-    $("accessPinModal").removeAttribute("hidden");
-
-    $("welcomeModal").classList.add("is-hidden");
-    $("welcomeModal").setAttribute("hidden", "");
-    $("welcomeModal").setAttribute("aria-hidden", "true");
-
-    $("appShell").setAttribute("hidden", "");
-  }
-
-  function goToStep(step) {
-    Object.entries(panels).forEach(([key, panel]) => {
-      panel.classList.toggle("active", Number(key) === step);
-    });
-
-    stepItems.forEach((item) => {
-      const number = Number(item.dataset.step);
-      item.classList.toggle("active", number === step);
-      item.classList.toggle("done", number < step);
-    });
-
-    rules.forEach((rule, index) => {
-      rule.style.background =
-        index + 1 < step ? "var(--accent)" : "var(--line)";
-    });
-
-    $("panelHeading").textContent =
-      step === 1
-        ? "Verify your email"
-        : step === 2
-          ? "One last step"
-          : "All done";
-
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function message(el, text, type = "") {
-    el.hidden = false;
-    el.className = `message ${type}`.trim();
-    el.textContent = text;
-  }
-
-  function loading(button, busy, label) {
-    button.disabled = busy;
-    const span = button.querySelector("span");
-
-    if (span) {
-      span.textContent = busy ? "Please wait…" : label;
+      return deviceId;
+    } catch {
+      throw new Error(
+        "Browser tidak dapat menyimpan ID perangkat. Aktifkan penyimpanan browser."
+      );
     }
   }
 
-  async function callAPI(payload) {
+  // =========================================
+  // API
+  // =========================================
+
+  async function api(action, payload = {}) {
     const controller = new AbortController();
-    const timer = setTimeout(
+    const timeout = setTimeout(
       () => controller.abort(),
-      TIMEOUT_MS
+      REQUEST_TIMEOUT
     );
 
     try {
-      const response = await fetch(API, {
+      const response = await fetch(API_URL, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          "Accept": "application/json"
         },
-        body: JSON.stringify(payload),
-        signal: controller.signal
+        body: JSON.stringify({
+          action,
+          ...payload
+        }),
+        signal: controller.signal,
+        cache: "no-store"
       });
 
-      const data = await response.json().catch(() => ({}));
+      const raw = await response.text();
 
-      if (!response.ok && !data.message) {
-        data.message = `Request failed (${response.status})`;
+      let data;
+
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        throw new Error("Respons server tidak valid.");
       }
 
-      return data;
-    } catch (error) {
-      if (error.name === "AbortError") {
+      if (!response.ok || !data.success) {
         throw new Error(
-          "Server terlalu lama merespons. Coba lagi."
+          data.message || "Permintaan gagal diproses."
         );
       }
 
+      return data;
+
+    } catch (error) {
+      if (error.name === "AbortError") {
+        throw new Error("Server terlalu lama merespons.");
+      }
+
       throw error;
+
     } finally {
-      clearTimeout(timer);
+      clearTimeout(timeout);
     }
   }
 
   // =========================================
-  // PIN ACCESS
+  // MESSAGE
   // =========================================
 
-  $("accessPinForm").addEventListener("submit", async (event) => {
-    event.preventDefault();
+  function showMessage(element, message, success = false) {
+    if (!element) return;
 
-    const pin = $("accessPin").value.trim().toUpperCase();
-    const result = $("accessPinMessage");
-    const button = $("btnAccessPin");
+    element.textContent = message;
+    element.hidden = false;
+    element.style.color = success ? "#53634f" : "#9a493d";
+  }
 
-    if (!pin) {
-      return message(
-        result,
-        "Masukkan PIN akses terlebih dahulu.",
-        "error"
+  function clearMessage(element) {
+    if (!element) return;
+
+    element.textContent = "";
+    element.hidden = true;
+  }
+
+  function setButtonLoading(button, loading, loadingText, normalText) {
+    if (!button) return;
+
+    button.disabled = loading;
+
+    const span = button.querySelector("span");
+
+    if (span) {
+      span.textContent = loading
+        ? loadingText
+        : normalText;
+    } else {
+      button.textContent = loading
+        ? loadingText
+        : normalText;
+    }
+  }
+
+  // =========================================
+  // STEP NAVIGATION
+  // =========================================
+
+  function goToStep(step) {
+    if (!isUnlocked) return;
+
+    const steps = [
+      $("step1"),
+      $("step2"),
+      $("step3")
+    ];
+
+    steps.forEach((element, index) => {
+      if (!element) return;
+
+      element.classList.toggle(
+        "active",
+        index + 1 === step
       );
+    });
+
+    document.querySelectorAll(".progress-step").forEach((item) => {
+      const number = Number(item.dataset.step);
+
+      item.classList.toggle("active", number === step);
+      item.classList.toggle("completed", number < step);
+    });
+
+    const heading = $("panelHeading");
+
+    if (heading) {
+      heading.textContent = step === 1
+        ? "Verify your email"
+        : step === 2
+          ? "Check your inbox"
+          : "Verification complete";
+    }
+  }
+
+  // =========================================
+  // LOCK / UNLOCK
+  // =========================================
+
+  function lockApplication() {
+    isUnlocked = false;
+    pendingEmail = "";
+    successWasShown = false;
+
+    document.documentElement.classList.add("amprem-locked");
+
+    const pinModal = $("accessPinModal");
+    const welcomeModal = $("welcomeModal");
+    const successModal = $("successModal");
+    const appShell = $("appShell");
+
+    if (pinModal) {
+      pinModal.hidden = false;
+      pinModal.classList.remove("is-hidden");
+      pinModal.setAttribute("aria-hidden", "false");
     }
 
-    loading(button, true, "Buka akses");
-    message(result, "Memeriksa PIN dan perangkat…");
+    if (welcomeModal) {
+      welcomeModal.hidden = true;
+      welcomeModal.classList.add("is-hidden");
+      welcomeModal.setAttribute("aria-hidden", "true");
+    }
+
+    if (successModal) {
+      successModal.hidden = true;
+      successModal.classList.add("is-hidden");
+    }
+
+    if (appShell) {
+      appShell.hidden = true;
+    }
+
+    const pinInput = $("accessPin");
+    const pinMessage = $("accessPinMessage");
+
+    if (pinInput) pinInput.value = "";
+    clearMessage(pinMessage);
+
+    document.body.style.overflow = "hidden";
+  }
+
+  function unlockApplication() {
+    isUnlocked = true;
+
+    document.documentElement.classList.remove("amprem-locked");
+
+    const pinModal = $("accessPinModal");
+    const welcomeModal = $("welcomeModal");
+    const appShell = $("appShell");
+
+    if (pinModal) {
+      pinModal.hidden = true;
+      pinModal.classList.add("is-hidden");
+      pinModal.setAttribute("aria-hidden", "true");
+    }
+
+    if (appShell) {
+      appShell.hidden = false;
+    }
+
+    if (welcomeModal) {
+      welcomeModal.hidden = false;
+      welcomeModal.classList.remove("is-hidden");
+      welcomeModal.setAttribute("aria-hidden", "false");
+    }
+
+    document.body.style.overflow = "hidden";
+  }
+
+  // =========================================
+  // PIN ACTIVATION
+  // =========================================
+
+  const accessPinForm = $("accessPinForm");
+
+  accessPinForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    if (isUnlocked) return;
+
+    const pinInput = $("accessPin");
+    const submitButton = $("btnAccessPin");
+    const message = $("accessPinMessage");
+
+    const pin = pinInput?.value
+      ?.trim()
+      .toUpperCase();
+
+    if (!pin) {
+      showMessage(message, "Masukkan PIN akses terlebih dahulu.");
+      return;
+    }
+
+    setButtonLoading(
+      submitButton,
+      true,
+      "Memeriksa PIN...",
+      "Buka akses"
+    );
+
+    clearMessage(message);
 
     try {
-      const data = await callAPI({
-        action: "activate-pin",
+      const deviceId = getDeviceId();
+
+      const result = await api("activate-pin", {
         pin,
         deviceId
       });
 
-      if (!data.success) {
-        throw new Error(
-          data.message || "PIN tidak dapat digunakan."
-        );
+      if (!result.success) {
+        throw new Error(result.message || "PIN tidak valid.");
       }
 
-      // Unlock hanya selama halaman ini masih hidup.
-      isUnlocked = true;
+      showMessage(
+        message,
+        result.message || "PIN berhasil diverifikasi.",
+        true
+      );
 
-      $("accessPinModal").classList.add("is-hidden");
-      $("accessPinModal").setAttribute("hidden", "");
-
-      $("welcomeModal").removeAttribute("hidden");
-      $("welcomeModal").classList.remove("is-hidden");
-      $("welcomeModal").setAttribute("aria-hidden", "false");
+      unlockApplication();
 
     } catch (error) {
-      message(
-        result,
-        error.message || "Gagal memeriksa PIN.",
-        "error"
-      );
+      showMessage(message, error.message);
+
+      if (pinInput) {
+        pinInput.focus();
+      }
+
     } finally {
-      loading(button, false, "Buka akses");
+      setButtonLoading(
+        submitButton,
+        false,
+        "Memeriksa PIN...",
+        "Buka akses"
+      );
     }
   });
 
   // =========================================
-  // WELCOME / CONTINUE
+  // WELCOME MODAL
   // =========================================
 
-  $("btnWelcomeContinue").addEventListener("click", () => {
-    if (!isUnlocked) {
-      showPinGate();
-      return;
+  $("btnWelcomeContinue")?.addEventListener("click", () => {
+    if (!isUnlocked) return;
+
+    const welcomeModal = $("welcomeModal");
+
+    if (welcomeModal) {
+      welcomeModal.classList.add("is-hidden");
+      welcomeModal.hidden = true;
+      welcomeModal.setAttribute("aria-hidden", "true");
     }
 
-    $("welcomeModal").classList.add("is-hidden");
-    $("welcomeModal").setAttribute("hidden", "");
-    $("welcomeModal").setAttribute("aria-hidden", "true");
-
-    $("appShell").removeAttribute("hidden");
+    document.body.style.overflow = "";
+    goToStep(1);
   });
 
   // =========================================
   // SEND MAGIC LINK
   // =========================================
 
-  $("sendForm").addEventListener("submit", async (event) => {
+  $("sendForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
 
     if (!isUnlocked) {
-      showPinGate();
+      lockApplication();
       return;
     }
 
-    const email = $("email").value.trim();
+    const emailInput = $("email");
+    const button = $("btnSend");
     const result = $("result1");
 
+    const email = emailInput?.value?.trim() || "";
+
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return message(
-        result,
-        "Masukkan alamat email yang valid.",
-        "error"
-      );
+      showMessage(result, "Masukkan alamat email yang valid.");
+      return;
     }
 
-    const button = $("btnSend");
+    clearMessage(result);
 
-    loading(button, true, "Send verification link");
-    message(result, "Mengirim tautan verifikasi…");
+    setButtonLoading(
+      button,
+      true,
+      "Mengirim...",
+      "Send verification link"
+    );
 
     try {
-      const data = await callAPI({
-        action: "send-magiclink",
+      const data = await api("send-magiclink", {
         email
       });
 
-      if (!data.success) {
-        throw new Error(
-          data.message || "Gagal mengirim tautan."
-        );
+      pendingEmail = email;
+
+      const preview = $("emailPreview");
+
+      if (preview) {
+        preview.textContent = email;
       }
 
-      pendingEmail = email;
-      $("emailPreview").textContent = email;
-
-      message(
+      showMessage(
         result,
-        data.message || "Tautan verifikasi berhasil dikirim.",
-        "success"
+        data.message || "Permintaan pengiriman berhasil diproses.",
+        true
       );
 
-      setTimeout(() => goToStep(2), 700);
+      goToStep(2);
 
     } catch (error) {
-      message(
-        result,
-        error.message || "Terjadi kesalahan.",
-        "error"
-      );
+      showMessage(result, error.message);
+
     } finally {
-      loading(button, false, "Send verification link");
+      setButtonLoading(
+        button,
+        false,
+        "Mengirim...",
+        "Send verification link"
+      );
     }
   });
 
   // =========================================
-  // VERIFY ACCOUNT
+  // VERIFY MAGIC LINK
   // =========================================
 
-  $("verifyForm").addEventListener("submit", async (event) => {
+  $("verifyForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
 
     if (!isUnlocked) {
-      showPinGate();
+      lockApplication();
       return;
     }
 
-    const email = pendingEmail;
-    const rawLink = $("magicLink").value.trim();
+    const linkInput = $("magicLink");
+    const button = $("btnVerify");
     const result = $("result2");
 
-    if (!email) {
-      message(
-        result,
-        "Sesi email tidak ditemukan. Silakan mulai kembali.",
-        "error"
-      );
+    const rawLink = linkInput?.value?.trim() || "";
 
+    if (!pendingEmail) {
+      showMessage(
+        result,
+        "Email belum dipilih. Silakan mulai dari awal."
+      );
       goToStep(1);
       return;
     }
 
-    if (!rawLink) {
-      return message(
-        result,
-        "Masukkan tautan verifikasi dari email.",
-        "error"
-      );
-    }
-
-    let parsed;
+    let parsedLink;
 
     try {
-      parsed = new URL(rawLink);
+      parsedLink = new URL(rawLink);
     } catch {
-      message(result, "Format tautan tidak valid.", "error");
+      showMessage(result, "Format verification link tidak valid.");
       return;
     }
 
-    if (parsed.protocol !== "https:") {
-      return message(
-        result,
-        "Tautan harus menggunakan HTTPS.",
-        "error"
-      );
+    if (parsedLink.protocol !== "https:") {
+      showMessage(result, "Link harus menggunakan HTTPS.");
+      return;
     }
 
-    const button = $("btnVerify");
+    clearMessage(result);
 
-    loading(button, true, "Verify email");
-    message(result, "Memverifikasi alamat email…");
+    setButtonLoading(
+      button,
+      true,
+      "Memverifikasi...",
+      "Verify email"
+    );
 
     try {
-      const data = await callAPI({
-        action: "verify-account",
-        email,
+      const data = await api("verify-account", {
+        email: pendingEmail,
         rawLink
       });
 
-      if (!data.success) {
-        throw new Error(
-          data.message || "Verifikasi gagal."
-        );
+      const finalEmail = $("finalEmail");
+
+      if (finalEmail) {
+        finalEmail.textContent = pendingEmail;
       }
 
-      $("finalEmail").textContent = email;
+      goToStep(3);
+      showSuccessModal();
 
-      message(
+      showMessage(
         result,
-        data.message || "Email berhasil diverifikasi.",
-        "success"
+        data.message || "Verifikasi berhasil diproses.",
+        true
       );
-
-      setTimeout(() => goToStep(3), 700);
 
     } catch (error) {
-      message(
-        result,
-        error.message || "Terjadi kesalahan.",
-        "error"
-      );
+      showMessage(result, error.message);
+
     } finally {
-      loading(button, false, "Verify email");
+      setButtonLoading(
+        button,
+        false,
+        "Memverifikasi...",
+        "Verify email"
+      );
     }
   });
 
   // =========================================
-  // NAVIGATION
+  // SUCCESS MODAL
   // =========================================
 
-  $("btnBack").addEventListener("click", () => {
-    if (!isUnlocked) {
-      showPinGate();
-      return;
+  function showSuccessModal() {
+    if (!isUnlocked || successWasShown) return;
+
+    const email = $("finalEmail")?.textContent?.trim() || "—";
+    const modal = $("successModal");
+    const modalEmail = $("modalPremiumEmail");
+
+    if (modalEmail) {
+      modalEmail.textContent = email;
     }
 
-    $("magicLink").value = "";
-    $("result2").hidden = true;
+    if (modal) {
+      modal.hidden = false;
+      modal.classList.remove("is-hidden");
+      modal.setAttribute("aria-hidden", "false");
+    }
 
-    goToStep(1);
-    $("email").focus();
+    successWasShown = true;
+    document.body.style.overflow = "hidden";
+  }
+
+  function hideSuccessModal() {
+    const modal = $("successModal");
+
+    if (modal) {
+      modal.classList.add("is-hidden");
+      modal.hidden = true;
+      modal.setAttribute("aria-hidden", "true");
+    }
+
+    document.body.style.overflow = "";
+  }
+
+  $("btnCloseSuccess")?.addEventListener("click", () => {
+    hideSuccessModal();
   });
 
-  $("btnRestart").addEventListener("click", () => {
-    if (!isUnlocked) {
-      showPinGate();
-      return;
-    }
+  $("btnVerifyAnother")?.addEventListener("click", () => {
+    hideSuccessModal();
+    successWasShown = false;
+    restartVerification();
+  });
+
+  // =========================================
+  // BACK / RESTART
+  // =========================================
+
+  $("btnBack")?.addEventListener("click", () => {
+    if (!isUnlocked) return;
 
     pendingEmail = "";
 
-    $("email").value = "";
-    $("magicLink").value = "";
+    if ($("email")) $("email").value = "";
+    if ($("magicLink")) $("magicLink").value = "";
 
-    $("result1").hidden = true;
-    $("result2").hidden = true;
+    clearMessage($("result1"));
+    clearMessage($("result2"));
 
     goToStep(1);
-    $("email").focus();
+  });
+
+  function restartVerification() {
+    if (!isUnlocked) return;
+
+    pendingEmail = "";
+    successWasShown = false;
+
+    if ($("email")) $("email").value = "";
+    if ($("magicLink")) $("magicLink").value = "";
+    if ($("finalEmail")) $("finalEmail").textContent = "—";
+    if ($("modalPremiumEmail")) $("modalPremiumEmail").textContent = "—";
+
+    clearMessage($("result1"));
+    clearMessage($("result2"));
+
+    hideSuccessModal();
+    goToStep(1);
+  }
+
+  $("btnRestart")?.addEventListener("click", restartVerification);
+
+  // =========================================
+  // BROWSER RESTORE / BACK-FORWARD CACHE
+  // =========================================
+
+  window.addEventListener("pageshow", (event) => {
+    // Jika halaman dipulihkan dari BFCache,
+    // minta PIN lagi.
+    if (event.persisted) {
+      lockApplication();
+      return;
+    }
+
+    // Pastikan halaman awal tetap terkunci.
+    if (!isUnlocked) {
+      lockApplication();
+    }
   });
 
   // =========================================
   // INITIAL STATE
   // =========================================
 
-  showPinGate();
-  goToStep(1);
+  // Selalu mulai dalam kondisi terkunci.
+  // Tidak ada status unlock yang disimpan ke storage.
+  lockApplication();
 
 })();
