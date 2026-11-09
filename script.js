@@ -20,7 +20,6 @@
     }
     return id;
   }
-
   const deviceId = getDeviceId();
 
   function goToStep(step) {
@@ -43,7 +42,8 @@
 
   function loading(button, busy, label) {
     button.disabled = busy;
-    button.querySelector("span").textContent = busy ? "Please wait…" : label;
+    const span = button.querySelector("span");
+    if (span) span.textContent = busy ? "Please wait…" : label;
   }
 
   async function callAPI(payload) {
@@ -67,21 +67,16 @@
     }
   }
 
-  // PIN gate must pass before the welcome popup can be opened.
+  // PIN must be validated by the server before any application content is revealed.
   $("accessPinForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const pin = $("accessPin").value.trim().toUpperCase();
     const result = $("accessPinMessage");
     const button = $("btnAccessPin");
-
-    if (!pin) {
-      message(result, "Masukkan PIN akses terlebih dahulu.", "error");
-      return;
-    }
+    if (!pin) return message(result, "Masukkan PIN akses terlebih dahulu.", "error");
 
     loading(button, true, "Buka akses");
     message(result, "Memeriksa PIN dan perangkat…");
-
     try {
       const data = await callAPI({ action: "activate-pin", pin, deviceId });
       if (!data.success) throw new Error(data.message || "PIN tidak dapat digunakan.");
@@ -97,14 +92,19 @@
     }
   });
 
+  // Only the welcome action reveals the main app after successful PIN activation.
+  $("btnWelcomeContinue").addEventListener("click", () => {
+    $("welcomeModal").classList.add("is-hidden");
+    $("welcomeModal").setAttribute("hidden", "");
+    $("welcomeModal").setAttribute("aria-hidden", "true");
+    $("appShell").removeAttribute("hidden");
+  });
+
   $("sendForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const email = $("email").value.trim();
     const result = $("result1");
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      message(result, "Masukkan alamat email yang valid.", "error");
-      return;
-    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return message(result, "Masukkan alamat email yang valid.", "error");
 
     const button = $("btnSend");
     loading(button, true, "Send verification link");
@@ -133,20 +133,14 @@
       goToStep(1);
       return;
     }
-    if (!rawLink) {
-      message(result, "Masukkan tautan verifikasi dari email.", "error");
-      return;
-    }
+    if (!rawLink) return message(result, "Masukkan tautan verifikasi dari email.", "error");
 
     let parsed;
     try { parsed = new URL(rawLink); } catch {
       message(result, "Format tautan tidak valid.", "error");
       return;
     }
-    if (parsed.protocol !== "https:") {
-      message(result, "Tautan harus menggunakan HTTPS.", "error");
-      return;
-    }
+    if (parsed.protocol !== "https:") return message(result, "Tautan harus menggunakan HTTPS.", "error");
 
     const button = $("btnVerify");
     loading(button, true, "Verify email");
