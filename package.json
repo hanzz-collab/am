@@ -4,6 +4,6 @@
   "private": true,
   "description": "AMPReM email verification portal with private PIN access",
   "dependencies": {
-    "@netlify/blobs": "11.1.7"
+    "@netlify/blobs": "latest"
   }
 }
