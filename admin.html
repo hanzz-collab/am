@@ -1,94 +1,716 @@
+
 <!doctype html>
 <html lang="id">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f3eee4">
-  <title>AMPReM · Admin PIN Generator</title>
+  <title>AMPReM · Admin Key Manager</title>
   <link rel="stylesheet" href="/style.css">
+
   <style>
-    body{min-height:100vh}.admin-wrap{max-width:620px;margin:9vh auto;padding:24px}
-    .admin-card{background:#fffdf8;border:1px solid #e9e3d8;padding:32px;box-shadow:0 24px 70px #362f2317}
-    .admin-card h1{font:500 36px/1.1 "Playfair Display",serif;margin:10px 0}
-    .admin-card p{font-size:13px;line-height:1.7;color:#777468}
-    .admin-card label{display:block;margin:20px 0 8px;font:9px "DM Mono",monospace;letter-spacing:.12em}
-    .admin-card input{width:100%;height:48px;padding:0 13px;border:1px solid #e2dccf;background:#fffefa}
-    .admin-card button{width:100%;height:48px;margin-top:14px;background:#53634f;color:white;border:0;cursor:pointer}
-    .generated{display:none;margin-top:20px;padding:18px;background:#f3f7f0;border:1px solid #d8e2d3}
-    .generated strong{display:block;font:600 22px "DM Mono",monospace;letter-spacing:.08em;margin:10px 0;overflow-wrap:anywhere}
-    .generated button{margin-top:8px}
-    .admin-msg{font-size:12px;margin-top:12px;color:#9a493d}
+    * { box-sizing: border-box; }
+
+    body {
+      min-height: 100vh;
+      background: #f3eee4;
+    }
+
+    .admin-wrap {
+      width: min(100% - 32px, 900px);
+      margin: 45px auto 70px;
+    }
+
+    .admin-card {
+      background: #fffdf8;
+      border: 1px solid #e9e3d8;
+      padding: 30px;
+      margin-top: 22px;
+      box-shadow: 0 24px 70px #362f2310;
+    }
+
+    .admin-card h1 {
+      font: 500 clamp(30px, 5vw, 40px)/1.1 "Playfair Display", serif;
+      margin: 10px 0;
+      color: #292820;
+    }
+
+    .admin-card h2 {
+      font: 500 25px "Playfair Display", serif;
+      margin: 0;
+      color: #292820;
+    }
+
+    .admin-card p {
+      font-size: 12px;
+      line-height: 1.8;
+      color: #777468;
+    }
+
+    .admin-card label {
+      display: block;
+      margin: 19px 0 8px;
+      font: 9px "DM Mono", monospace;
+      letter-spacing: .12em;
+      color: #777468;
+    }
+
+    .admin-card input {
+      width: 100%;
+      height: 47px;
+      padding: 0 13px;
+      border: 1px solid #e2dccf;
+      background: #fffefa;
+      color: #292820;
+      outline: none;
+    }
+
+    .admin-card input:focus {
+      border-color: #53634f;
+    }
+
+    .admin-card button {
+      min-height: 43px;
+      padding: 0 17px;
+      border: 0;
+      background: #53634f;
+      color: white;
+      font: 11px "DM Sans", sans-serif;
+      cursor: pointer;
+      transition: .2s;
+    }
+
+    .admin-card button:hover {
+      background: #3f4d3b;
+    }
+
+    .admin-card button:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+    }
+
+    .primary-button {
+      width: 100%;
+      margin-top: 15px;
+      height: 48px;
+    }
+
+    .admin-msg {
+      font-size: 12px;
+      margin-top: 12px;
+      color: #9a493d;
+      line-height: 1.6;
+    }
+
+    .generated {
+      display: none;
+      margin-top: 20px;
+      padding: 20px;
+      background: #f3f7f0;
+      border: 1px solid #d8e2d3;
+    }
+
+    .generated strong {
+      display: block;
+      font: 600 23px "DM Mono", monospace;
+      letter-spacing: .06em;
+      margin: 12px 0;
+      overflow-wrap: anywhere;
+      color: #3f4d3b;
+    }
+
+    .generated button {
+      width: 100%;
+      margin-top: 8px;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 22px 0;
+    }
+
+    .stat {
+      padding: 17px;
+      background: #f8f6ef;
+      border: 1px solid #e9e3d8;
+      min-width: 0;
+    }
+
+    .stat span {
+      display: block;
+      color: #777468;
+      font: 9px "DM Mono", monospace;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .stat strong {
+      display: block;
+      color: #292820;
+      font: 500 27px "Playfair Display", serif;
+      margin-top: 8px;
+    }
+
+    .list-heading {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 15px;
+      flex-wrap: wrap;
+      margin-bottom: 15px;
+    }
+
+    .list-heading button {
+      min-width: 110px;
+    }
+
+    .key-list {
+      display: grid;
+      gap: 11px;
+    }
+
+    .key-item {
+      border: 1px solid #e8e2d7;
+      background: #fffefa;
+      padding: 17px;
+      min-width: 0;
+    }
+
+    .key-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .key-code {
+      font: 600 15px "DM Mono", monospace;
+      letter-spacing: .035em;
+      overflow-wrap: anywhere;
+      color: #292820;
+    }
+
+    .key-label {
+      margin-top: 6px;
+      font-size: 11px;
+      color: #777468;
+      overflow-wrap: anywhere;
+    }
+
+    .key-meta {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 15px;
+      margin-top: 15px;
+      padding-top: 13px;
+      border-top: 1px solid #eee9df;
+    }
+
+    .key-meta span {
+      display: block;
+      font: 9px "DM Mono", monospace;
+      color: #999487;
+      margin-bottom: 5px;
+    }
+
+    .key-meta strong {
+      display: block;
+      font: 11px "DM Sans", sans-serif;
+      color: #514f45;
+      overflow-wrap: anywhere;
+    }
+
+    .key-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .key-actions button {
+      flex: 1;
+      min-width: 0;
+      min-height: 38px;
+      font-size: 10px;
+    }
+
+    .copy-button {
+      background: #e9eee5 !important;
+      color: #53634f !important;
+    }
+
+    .copy-button:hover {
+      background: #dce5d6 !important;
+    }
+
+    .revoke-button {
+      background: #f5e9e5 !important;
+      color: #9a493d !important;
+    }
+
+    .revoke-button:hover {
+      background: #efdcd6 !important;
+    }
+
+    .status {
+      display: inline-block;
+      flex-shrink: 0;
+      padding: 6px 9px;
+      font: 9px "DM Mono", monospace;
+      border-radius: 2px;
+      white-space: nowrap;
+    }
+
+    .status-active {
+      background: #e9eee5;
+      color: #53634f;
+    }
+
+    .status-used {
+      background: #f5efdf;
+      color: #94743b;
+    }
+
+    .status-revoked {
+      background: #f5e9e5;
+      color: #9a493d;
+    }
+
+    .status-legacy {
+      background: #eceae5;
+      color: #777468;
+    }
+
+    .empty-state {
+      padding: 35px 15px;
+      text-align: center;
+      border: 1px dashed #dcd5c9;
+      color: #777468;
+      font-size: 12px;
+    }
+
+    .fine-print {
+      font-size: 10px !important;
+      color: #999487 !important;
+    }
+
+    @media (max-width: 600px) {
+      .admin-wrap {
+        margin-top: 20px;
+      }
+
+      .admin-card {
+        padding: 21px 17px;
+      }
+
+      .stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .key-top {
+        flex-direction: column;
+      }
+
+      .key-meta {
+        grid-template-columns: 1fr;
+      }
+    }
   </style>
 </head>
+
 <body>
   <div class="paper-grain" aria-hidden="true"></div>
+
   <main class="admin-wrap">
-    <header class="topbar"><a class="wordmark" href="/"><span class="mark">A</span><span>AM <i>PREM</i></span></a><span class="top-note">ADMIN ACCESS</span></header>
+    <header class="topbar">
+      <a class="wordmark" href="/">
+        <span class="mark">A</span>
+        <span>AM <i>PREM</i></span>
+      </a>
+      <span class="top-note">ADMIN ACCESS</span>
+    </header>
+
+    <!-- GENERATOR -->
     <section class="admin-card">
       <p class="eyebrow">PRIVATE CONTROL PANEL</p>
-      <h1>PIN Generator.</h1>
-      <p>Masukkan admin key yang disimpan di Netlify Environment Variables. PIN hanya ditampilkan sekali setelah dibuat.</p>
+      <h1>Key Manager.</h1>
+      <p>
+        Generate PIN akses baru dan kelola semua key AMPReM
+        dari satu tempat.
+      </p>
+
       <form id="generateForm">
         <label for="adminKey">ADMIN KEY</label>
-        <input id="adminKey" type="password" autocomplete="current-password" required>
-        <label for="pinLabel">LABEL / CATATAN (OPSIONAL)</label>
-        <input id="pinLabel" maxlength="80" placeholder="Contoh: User order #001">
-        <button type="submit" id="generateButton">Generate PIN</button>
+        <input
+          id="adminKey"
+          type="password"
+          autocomplete="current-password"
+          placeholder="Masukkan admin key"
+          required
+        >
+
+        <label for="pinLabel">LABEL / CATATAN</label>
+        <input
+          id="pinLabel"
+          maxlength="80"
+          placeholder="Contoh: User order #001"
+        >
+
+        <button
+          type="submit"
+          class="primary-button"
+          id="generateButton"
+        >
+          Generate PIN
+        </button>
       </form>
+
       <div class="admin-msg" id="adminMessage" role="status"></div>
+
       <div class="generated" id="generatedBox">
-        <span class="eyebrow">PIN BARU · SALIN SEKARANG</span>
+        <span class="eyebrow">PIN BARU · BERHASIL DIBUAT</span>
         <strong id="generatedPin"></strong>
-        <p>PIN ini akan terkunci ke perangkat pertama yang mengaktifkannya.</p>
-        <button type="button" id="copyPin">Salin PIN</button>
+        <p>
+          Simpan PIN ini. PIN akan terikat ke perangkat
+          pertama yang mengaktifkannya.
+        </p>
+        <button type="button" id="copyPin">
+          Salin PIN
+        </button>
       </div>
     </section>
+
+    <!-- KEY LIST -->
+    <section class="admin-card">
+      <div class="list-heading">
+        <div>
+          <p class="eyebrow">ACCESS DATABASE</p>
+          <h2>Daftar Key.</h2>
+        </div>
+
+        <button type="button" id="refreshButton">
+          ↻ Refresh
+        </button>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <span>Total Key</span>
+          <strong id="totalCount">—</strong>
+        </div>
+
+        <div class="stat">
+          <span>Aktif</span>
+          <strong id="activeCount">—</strong>
+        </div>
+
+        <div class="stat">
+          <span>Digunakan</span>
+          <strong id="usedCount">—</strong>
+        </div>
+
+        <div class="stat">
+          <span>Revoked</span>
+          <strong id="revokedCount">—</strong>
+        </div>
+      </div>
+
+      <div class="admin-msg" id="listMessage"></div>
+      <div class="key-list" id="keyList">
+        <div class="empty-state">
+          Masukkan admin key lalu tekan Refresh untuk melihat daftar PIN.
+        </div>
+      </div>
+
+      <p class="fine-print">
+        PIN lama yang dibuat sebelum fitur enkripsi tidak dapat
+        ditampilkan kembali. Data tanggal dan statusnya tetap tersedia.
+      </p>
+    </section>
   </main>
+
   <script>
-    const form = document.getElementById("generateForm");
-    const button = document.getElementById("generateButton");
-    const message = document.getElementById("adminMessage");
-    const box = document.getElementById("generatedBox");
-    const pinText = document.getElementById("generatedPin");
+    const $ = (id) => document.getElementById(id);
+
+    const form = $("generateForm");
+    const adminKeyInput = $("adminKey");
+    const generateButton = $("generateButton");
+    const message = $("adminMessage");
+    const listMessage = $("listMessage");
+    const keyList = $("keyList");
+    const generatedBox = $("generatedBox");
+    const generatedPin = $("generatedPin");
+
+    let lastGeneratedPin = "";
+
+    function getAdminKey() {
+      return adminKeyInput.value.trim();
+    }
+
+    async function api(action, extra = {}) {
+      const response = await fetch("/.netlify/functions/amprem", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action,
+          adminKey: getAdminKey(),
+          ...extra
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || "Permintaan gagal.");
+      }
+
+      return data;
+    }
+
+    function formatDate(value) {
+      if (!value) return "Belum tersedia";
+
+      const date = new Date(value);
+
+      if (Number.isNaN(date.getTime())) {
+        return "Belum tersedia";
+      }
+
+      return new Intl.DateTimeFormat("id-ID", {
+        dateStyle: "medium",
+        timeStyle: "short"
+      }).format(date);
+    }
+
+    function setMessage(element, text, success = false) {
+      element.textContent = text;
+      element.style.color = success ? "#53634f" : "#9a493d";
+    }
+
+    function createKeyCard(item) {
+      const card = document.createElement("article");
+      card.className = "key-item";
+
+      const top = document.createElement("div");
+      top.className = "key-top";
+
+      const info = document.createElement("div");
+
+      const code = document.createElement("div");
+      code.className = "key-code";
+      code.textContent = item.pin || "PIN tidak tersedia";
+
+      const label = document.createElement("div");
+      label.className = "key-label";
+      label.textContent = item.label || "Tanpa label";
+
+      info.append(code, label);
+
+      const status = document.createElement("span");
+      status.className = "status";
+
+      const statusNames = {
+        active: "AKTIF",
+        used: "DIGUNAKAN",
+        revoked: "REVOKED"
+      };
+
+      if (item.legacy) {
+        status.textContent = "PIN LAMA";
+        status.classList.add("status-legacy");
+      } else {
+        status.textContent = statusNames[item.status] || "UNKNOWN";
+        status.classList.add(`status-${item.status}`);
+      }
+
+      top.append(info, status);
+
+      const meta = document.createElement("div");
+      meta.className = "key-meta";
+
+      const created = document.createElement("div");
+      const createdLabel = document.createElement("span");
+      createdLabel.textContent = "DIBUAT PADA";
+      const createdValue = document.createElement("strong");
+      createdValue.textContent = formatDate(item.createdAt);
+      created.append(createdLabel, createdValue);
+
+      const activated = document.createElement("div");
+      const activatedLabel = document.createElement("span");
+      activatedLabel.textContent = "DIAKTIFKAN PADA";
+      const activatedValue = document.createElement("strong");
+      activatedValue.textContent = formatDate(item.activatedAt);
+      activated.append(activatedLabel, activatedValue);
+
+      meta.append(created, activated);
+
+      card.append(top, meta);
+
+      const actions = document.createElement("div");
+      actions.className = "key-actions";
+
+      if (item.pin) {
+        const copy = document.createElement("button");
+        copy.type = "button";
+        copy.className = "copy-button";
+        copy.textContent = "Salin PIN";
+
+        copy.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(item.pin);
+            setMessage(listMessage, "PIN berhasil disalin.", true);
+          } catch {
+            setMessage(listMessage, "Gagal menyalin PIN.");
+          }
+        });
+
+        actions.append(copy);
+      }
+
+      if (item.pin && item.status !== "revoked") {
+        const revoke = document.createElement("button");
+        revoke.type = "button";
+        revoke.className = "revoke-button";
+        revoke.textContent = "Revoke";
+
+        revoke.addEventListener("click", async () => {
+          const confirmed = confirm(
+            `Nonaktifkan PIN ${item.pin}? Tindakan ini tidak dapat dibatalkan.`
+          );
+
+          if (!confirmed) return;
+
+          revoke.disabled = true;
+          revoke.textContent = "Memproses...";
+
+          try {
+            await api("admin-revoke-pin", {
+              pin: item.pin
+            });
+
+            setMessage(listMessage, "PIN berhasil dinonaktifkan.", true);
+            await loadPins();
+          } catch (error) {
+            setMessage(listMessage, error.message);
+            revoke.disabled = false;
+            revoke.textContent = "Revoke";
+          }
+        });
+
+        actions.append(revoke);
+      }
+
+      if (actions.children.length) {
+        card.append(actions);
+      }
+
+      return card;
+    }
+
+    async function loadPins() {
+      if (!getAdminKey()) {
+        setMessage(listMessage, "Masukkan admin key terlebih dahulu.");
+        return;
+      }
+
+      const refreshButton = $("refreshButton");
+      refreshButton.disabled = true;
+      refreshButton.textContent = "Memuat...";
+
+      setMessage(listMessage, "");
+      keyList.innerHTML = "";
+
+      try {
+        const data = await api("admin-list-pins");
+
+        $("totalCount").textContent = data.total;
+        $("activeCount").textContent = data.active;
+        $("usedCount").textContent = data.used;
+        $("revokedCount").textContent = data.revoked;
+
+        if (!data.pins.length) {
+          const empty = document.createElement("div");
+          empty.className = "empty-state";
+          empty.textContent = "Belum ada PIN yang dibuat.";
+          keyList.append(empty);
+          return;
+        }
+
+        for (const item of data.pins) {
+          keyList.append(createKeyCard(item));
+        }
+
+        setMessage(
+          listMessage,
+          `${data.total} key ditemukan. ${data.legacy} PIN lama tidak dapat ditampilkan.`,
+          true
+        );
+
+      } catch (error) {
+        setMessage(listMessage, error.message);
+
+        const empty = document.createElement("div");
+        empty.className = "empty-state";
+        empty.textContent = "Gagal memuat daftar key.";
+        keyList.append(empty);
+
+      } finally {
+        refreshButton.disabled = false;
+        refreshButton.textContent = "↻ Refresh";
+      }
+    }
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      button.disabled = true;
-      button.textContent = "Membuat PIN…";
+
+      generateButton.disabled = true;
+      generateButton.textContent = "Membuat PIN...";
       message.textContent = "";
-      box.style.display = "none";
+      generatedBox.style.display = "none";
+
       try {
-        const response = await fetch("/.netlify/functions/amprem", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "admin-generate-pin",
-            adminKey: document.getElementById("adminKey").value,
-            label: document.getElementById("pinLabel").value
-          })
+        const data = await api("admin-generate-pin", {
+          label: $("pinLabel").value
         });
-        const data = await response.json();
-        if (!response.ok || !data.success) throw new Error(data.message || "Gagal membuat PIN.");
-        pinText.textContent = data.pin;
-        box.style.display = "block";
-        message.style.color = "#53634f";
-        message.textContent = data.message;
+
+        lastGeneratedPin = data.pin;
+        generatedPin.textContent = data.pin;
+        generatedBox.style.display = "block";
+
+        setMessage(message, data.message, true);
+
+        $("pinLabel").value = "";
+
+        await loadPins();
+
       } catch (error) {
-        message.style.color = "#9a493d";
-        message.textContent = error.message;
+        setMessage(message, error.message);
+
       } finally {
-        button.disabled = false;
-        button.textContent = "Generate PIN";
+        generateButton.disabled = false;
+        generateButton.textContent = "Generate PIN";
       }
     });
 
-    document.getElementById("copyPin").addEventListener("click", async () => {
+    $("copyPin").addEventListener("click", async () => {
+      if (!lastGeneratedPin) return;
+
       try {
-        await navigator.clipboard.writeText(pinText.textContent);
-        message.textContent = "PIN berhasil disalin.";
+        await navigator.clipboard.writeText(lastGeneratedPin);
+        setMessage(message, "PIN berhasil disalin.", true);
       } catch {
-        message.textContent = "Gagal menyalin otomatis. Silakan salin PIN secara manual.";
+        setMessage(message, "Gagal menyalin PIN. Salin secara manual.");
       }
+    });
+
+    $("refreshButton").addEventListener("click", loadPins);
+
+    // Muat otomatis setelah admin key diisi dan input kehilangan fokus.
+    adminKeyInput.addEventListener("change", () => {
+      if (getAdminKey()) loadPins();
     });
   </script>
 </body>
