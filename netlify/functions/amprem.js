@@ -340,6 +340,62 @@ for (const candidate of [...new Set(possibleKeys)]) {
     }
 
     // =========================================
+// ADMIN: DELETE PIN PERMANENT
+// =========================================
+if (action === "admin-delete-pin") {
+  if (!verifyAdmin(body)) {
+    return response(401, {
+      success: false,
+      message: "Admin key tidak valid.",
+    });
+  }
+
+  if (!validPin(body.pin)) {
+    return response(400, {
+      success: false,
+      message: "Format PIN tidak valid.",
+    });
+  }
+
+  const store = getAccessStore();
+  const inputPin = body.pin.trim();
+
+  const possibleKeys = [
+    `pin:${sha256(inputPin)}`,
+    `pin:${sha256(inputPin.toUpperCase())}`,
+  ];
+
+  let key = null;
+  let record = null;
+
+  for (const candidate of [...new Set(possibleKeys)]) {
+    const found = await store.get(candidate, {
+      type: "json",
+    });
+
+    if (found) {
+      key = candidate;
+      record = found;
+      break;
+    }
+  }
+
+  if (!record || !key) {
+    return response(404, {
+      success: false,
+      message: "PIN tidak ditemukan.",
+    });
+  }
+
+  await store.delete(key);
+
+  return response(200, {
+    success: true,
+    message: "PIN berhasil dihapus permanen.",
+  });
+}
+
+    // =========================================
     // USER: ACTIVATE PIN
     // =========================================
     if (action === "activate-pin") {
