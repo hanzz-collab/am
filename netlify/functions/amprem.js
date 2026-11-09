@@ -298,13 +298,27 @@ export default async (request, context) => {
 
       const store = getAccessStore();
 
-      const key = `pin:${sha256(
-        body.pin.trim().toUpperCase()
-      )}`;
+      const inputPin = body.pin.trim();
 
-      const record = await store.get(key, {
-        type: "json",
-      });
+const possibleKeys = [
+  `pin:${sha256(inputPin)}`,
+  `pin:${sha256(inputPin.toUpperCase())}`,
+];
+
+let key = null;
+let record = null;
+
+for (const candidate of [...new Set(possibleKeys)]) {
+  const found = await store.get(candidate, {
+    type: "json",
+  });
+
+  if (found) {
+    key = candidate;
+    record = found;
+    break;
+  }
+}
 
       if (!record) {
         return response(404, {
