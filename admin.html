@@ -603,9 +603,47 @@
         actions.append(revoke);
       }
 
-      if (actions.children.length) {
-        card.append(actions);
-      }
+      if (item.pin) {
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "revoke-button";
+  del.textContent = "Hapus Permanen";
+
+  del.addEventListener("click", async () => {
+    const confirmed = confirm(
+      `Yakin ingin menghapus PIN ${item.pin} secara permanen? Data PIN dan riwayatnya akan hilang.`
+    );
+
+    if (!confirmed) return;
+
+    del.disabled = true;
+    del.textContent = "Menghapus...";
+
+    try {
+      await api("admin-delete-pin", {
+        pin: item.pin
+      });
+
+      setMessage(
+        listMessage,
+        "PIN berhasil dihapus permanen.",
+        true
+      );
+
+      await loadPins();
+    } catch (error) {
+      setMessage(listMessage, error.message);
+      del.disabled = false;
+      del.textContent = "Hapus Permanen";
+    }
+  });
+
+  actions.append(del);
+}
+
+if (actions.children.length) {
+  card.append(actions);
+}
 
       return card;
     }
