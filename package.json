@@ -1,8 +1,9 @@
 {
-  "name": "am-prem-paperbook",
-  "version": "2.0.0",
+  "name": "amprem-site",
+  "version": "1.0.0",
   "private": true,
-  "engines": {
-    "node": ">=18"
+  "description": "AMPReM email verification portal with private PIN access",
+  "dependencies": {
+    "@netlify/blobs": "latest"
   }
 }
