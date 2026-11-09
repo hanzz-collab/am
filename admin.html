@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f3eee4">
+  <title>AMPReM · Admin PIN Generator</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    body{min-height:100vh}.admin-wrap{max-width:620px;margin:9vh auto;padding:24px}
+    .admin-card{background:#fffdf8;border:1px solid #e9e3d8;padding:32px;box-shadow:0 24px 70px #362f2317}
+    .admin-card h1{font:500 36px/1.1 "Playfair Display",serif;margin:10px 0}
+    .admin-card p{font-size:13px;line-height:1.7;color:#777468}
+    .admin-card label{display:block;margin:20px 0 8px;font:9px "DM Mono",monospace;letter-spacing:.12em}
+    .admin-card input{width:100%;height:48px;padding:0 13px;border:1px solid #e2dccf;background:#fffefa}
+    .admin-card button{width:100%;height:48px;margin-top:14px;background:#53634f;color:white;border:0;cursor:pointer}
+    .generated{display:none;margin-top:20px;padding:18px;background:#f3f7f0;border:1px solid #d8e2d3}
+    .generated strong{display:block;font:600 22px "DM Mono",monospace;letter-spacing:.08em;margin:10px 0;overflow-wrap:anywhere}
+    .generated button{margin-top:8px}
+    .admin-msg{font-size:12px;margin-top:12px;color:#9a493d}
+  </style>
+</head>
+<body>
+  <div class="paper-grain" aria-hidden="true"></div>
+  <main class="admin-wrap">
+    <header class="topbar"><a class="wordmark" href="/"><span class="mark">A</span><span>AM <i>PREM</i></span></a><span class="top-note">ADMIN ACCESS</span></header>
+    <section class="admin-card">
+      <p class="eyebrow">PRIVATE CONTROL PANEL</p>
+      <h1>PIN Generator.</h1>
+      <p>Masukkan admin key yang disimpan di Netlify Environment Variables. PIN hanya ditampilkan sekali setelah dibuat.</p>
+      <form id="generateForm">
+        <label for="adminKey">ADMIN KEY</label>
+        <input id="adminKey" type="password" autocomplete="current-password" required>
+        <label for="pinLabel">LABEL / CATATAN (OPSIONAL)</label>
+        <input id="pinLabel" maxlength="80" placeholder="Contoh: User order #001">
+        <button type="submit" id="generateButton">Generate PIN</button>
+      </form>
+      <div class="admin-msg" id="adminMessage" role="status"></div>
+      <div class="generated" id="generatedBox">
+        <span class="eyebrow">PIN BARU · SALIN SEKARANG</span>
+        <strong id="generatedPin"></strong>
+        <p>PIN ini akan terkunci ke perangkat pertama yang mengaktifkannya.</p>
+        <button type="button" id="copyPin">Salin PIN</button>
+      </div>
+    </section>
+  </main>
+  <script>
+    const form = document.getElementById("generateForm");
+    const button = document.getElementById("generateButton");
+    const message = document.getElementById("adminMessage");
+    const box = document.getElementById("generatedBox");
+    const pinText = document.getElementById("generatedPin");
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      button.disabled = true;
+      button.textContent = "Membuat PIN…";
+      message.textContent = "";
+      box.style.display = "none";
+      try {
+        const response = await fetch("/.netlify/functions/amprem", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "admin-generate-pin",
+            adminKey: document.getElementById("adminKey").value,
+            label: document.getElementById("pinLabel").value
+          })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.message || "Gagal membuat PIN.");
+        pinText.textContent = data.pin;
+        box.style.display = "block";
+        message.style.color = "#53634f";
+        message.textContent = data.message;
+      } catch (error) {
+        message.style.color = "#9a493d";
+        message.textContent = error.message;
+      } finally {
+        button.disabled = false;
+        button.textContent = "Generate PIN";
+      }
+    });
+
+    document.getElementById("copyPin").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(pinText.textContent);
+        message.textContent = "PIN berhasil disalin.";
+      } catch {
+        message.textContent = "Gagal menyalin otomatis. Silakan salin PIN secara manual.";
+      }
+    });
+  </script>
+</body>
+</html>

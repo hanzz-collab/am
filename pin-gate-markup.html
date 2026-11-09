@@ -1,0 +1,16 @@
+<!-- PIN access gate: letakkan sebelum welcome popup di index.html -->
+<div class="modal-backdrop pin-backdrop" id="accessPinModal" role="dialog" aria-modal="true" aria-labelledby="accessPinTitle">
+  <section class="modal-card welcome-card pin-card">
+    <div class="modal-mark">A<span>✳</span></div>
+    <p class="eyebrow">PRIVATE DEVICE ACCESS</p>
+    <h2 id="accessPinTitle">Masukkan PIN.</h2>
+    <p class="modal-copy">Akses AMPReM hanya tersedia untuk PIN undangan. PIN akan terikat ke perangkat pertama yang mengaktifkannya.</p>
+    <form id="accessPinForm">
+      <label for="accessPin">ACCESS PIN</label>
+      <input id="accessPin" name="accessPin" type="text" placeholder="AM-XXXX-XXXX" autocomplete="off" autocapitalize="characters" required>
+      <button class="primary modal-primary" id="btnAccessPin" type="submit"><span>Buka akses</span><b>↗</b></button>
+    </form>
+    <div class="message" id="accessPinMessage" role="status" aria-live="polite" hidden></div>
+    <p class="fine-print">Jangan bagikan PIN akses kepada orang lain.</p>
+  </section>
+</div>

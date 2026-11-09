@@ -1,0 +1,27 @@
+/* DEVICE PIN GATE */
+.pin-backdrop { z-index: 10001; }
+.pin-card form { margin-top: 20px; }
+.pin-card label {
+  display: block;
+  margin: 0 0 9px;
+  color: #6d6a5e;
+  font: 9px "DM Mono", monospace;
+  letter-spacing: .12em;
+}
+.pin-card input {
+  width: 100%;
+  height: 49px;
+  border: 1px solid #e2dccf;
+  background: #fffefa;
+  padding: 0 14px;
+  color: var(--ink);
+  font: 600 14px "DM Mono", monospace;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  outline: none;
+}
+.pin-card input:focus {
+  border-color: #8b9a83;
+  box-shadow: 0 0 0 3px #53634f13;
+}
+.pin-card .message { margin-top: 14px; }
