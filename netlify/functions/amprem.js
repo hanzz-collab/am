@@ -60,7 +60,7 @@ function validDeviceId(value) {
 function validPin(value) {
   return (
     typeof value === "string" &&
-    /^AM-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/i.test(
+    /^AM-lanna-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/i.test(
       value.trim()
     )
   );
