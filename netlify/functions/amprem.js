@@ -43,7 +43,7 @@ function makePin() {
     value += chars[bytes[i] % chars.length];
   }
 
-  return `AM-lanna-${value.slice(0, 4)}-${value.slice(4)}`;
+  return `AM-LANNA-${value.slice(0, 4)}-${value.slice(4)}`;
 }
 
 function getEncryptionKey() {
@@ -111,7 +111,7 @@ function validDeviceId(value) {
 
 function validPin(value) {
   return typeof value === "string" &&
-    /^AM-lanna-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/i.test(
+    /^AM-LANNA-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/i.test(
       value.trim()
     );
 }
