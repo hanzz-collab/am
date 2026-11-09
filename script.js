@@ -5,40 +5,67 @@
   const API_URL = "/.netlify/functions/amprem";
   const REQUEST_TIMEOUT = 25000;
 
+  const DEVICE_KEY = "amprem_device_id_v1";
+  const SESSION_KEY = "amprem_session_token_v1";
+
   const $ = (id) => document.getElementById(id);
 
-  // Status akses hanya disimpan di memori.
-  // Refresh halaman akan mengatur ulang nilainya menjadi false.
   let isUnlocked = false;
   let pendingEmail = "";
   let successWasShown = false;
+  let restoringSession = false;
 
   // =========================================
-  // DEVICE ID
+  // STORAGE
   // =========================================
 
   function getDeviceId() {
-    const storageKey = "amprem_device_id_v1";
-
     try {
-      let deviceId = localStorage.getItem(storageKey);
+      let deviceId = localStorage.getItem(DEVICE_KEY);
 
       if (!deviceId) {
-        deviceId = (
+        deviceId =
           "amprem-" +
           crypto.randomUUID() +
           "-" +
-          crypto.randomUUID()
-        );
+          crypto.randomUUID();
 
-        localStorage.setItem(storageKey, deviceId);
+        localStorage.setItem(DEVICE_KEY, deviceId);
       }
 
       return deviceId;
     } catch {
       throw new Error(
-        "Browser tidak dapat menyimpan ID perangkat. Aktifkan penyimpanan browser."
+        "Browser tidak dapat menyimpan data akses. Aktifkan penyimpanan browser."
       );
+    }
+  }
+
+  function getSessionToken() {
+    try {
+      return localStorage.getItem(SESSION_KEY) || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function saveSessionToken(token) {
+    if (typeof token !== "string" || token.length < 30) {
+      throw new Error("Token sesi dari server tidak valid.");
+    }
+
+    try {
+      localStorage.setItem(SESSION_KEY, token);
+    } catch {
+      throw new Error("Gagal menyimpan sesi pada browser.");
+    }
+  }
+
+  function clearSessionToken() {
+    try {
+      localStorage.removeItem(SESSION_KEY);
+    } catch {
+      // Tidak perlu tindakan tambahan.
     }
   }
 
@@ -53,6 +80,21 @@
       REQUEST_TIMEOUT
     );
 
+    const protectedActions = [
+      "send-magiclink",
+      "verify-account"
+    ];
+
+    const requestPayload = {
+      action,
+      ...payload
+    };
+
+    if (protectedActions.includes(action)) {
+      requestPayload.sessionToken = getSessionToken();
+      requestPayload.deviceId = getDeviceId();
+    }
+
     try {
       const response = await fetch(API_URL, {
         method: "POST",
@@ -60,16 +102,12 @@
           "Content-Type": "application/json",
           "Accept": "application/json"
         },
-        body: JSON.stringify({
-          action,
-          ...payload
-        }),
+        body: JSON.stringify(requestPayload),
         signal: controller.signal,
         cache: "no-store"
       });
 
       const raw = await response.text();
-
       let data;
 
       try {
@@ -79,6 +117,11 @@
       }
 
       if (!response.ok || !data.success) {
+        if (data.sessionInvalid) {
+          clearSessionToken();
+          lockApplication();
+        }
+
         throw new Error(
           data.message || "Permintaan gagal diproses."
         );
@@ -125,13 +168,9 @@
     const span = button.querySelector("span");
 
     if (span) {
-      span.textContent = loading
-        ? loadingText
-        : normalText;
+      span.textContent = loading ? loadingText : normalText;
     } else {
-      button.textContent = loading
-        ? loadingText
-        : normalText;
+      button.textContent = loading ? loadingText : normalText;
     }
   }
 
@@ -206,6 +245,7 @@
     if (successModal) {
       successModal.hidden = true;
       successModal.classList.add("is-hidden");
+      successModal.setAttribute("aria-hidden", "true");
     }
 
     if (appShell) {
@@ -221,7 +261,7 @@
     document.body.style.overflow = "hidden";
   }
 
-  function unlockApplication() {
+  function unlockApplication(showWelcome = false) {
     isUnlocked = true;
 
     document.documentElement.classList.remove("amprem-locked");
@@ -241,21 +281,72 @@
     }
 
     if (welcomeModal) {
-      welcomeModal.hidden = false;
-      welcomeModal.classList.remove("is-hidden");
-      welcomeModal.setAttribute("aria-hidden", "false");
+      if (showWelcome) {
+        welcomeModal.hidden = false;
+        welcomeModal.classList.remove("is-hidden");
+        welcomeModal.setAttribute("aria-hidden", "false");
+        document.body.style.overflow = "hidden";
+      } else {
+        welcomeModal.hidden = true;
+        welcomeModal.classList.add("is-hidden");
+        welcomeModal.setAttribute("aria-hidden", "true");
+        document.body.style.overflow = "";
+      }
+    }
+  }
+
+  // =========================================
+  // RESTORE SAVED SESSION
+  // =========================================
+
+  async function restoreSession() {
+    if (restoringSession || isUnlocked) return;
+
+    restoringSession = true;
+
+    const token = getSessionToken();
+
+    if (!token) {
+      restoringSession = false;
+      lockApplication();
+      return;
     }
 
-    document.body.style.overflow = "hidden";
+    try {
+      const deviceId = getDeviceId();
+
+      const result = await api("verify-session", {
+        sessionToken: token,
+        deviceId
+      });
+
+      if (!result.success) {
+        throw new Error(result.message || "Sesi tidak valid.");
+      }
+
+      // Sesi valid: buka langsung tanpa menampilkan welcome lagi.
+      unlockApplication(false);
+
+    } catch (error) {
+      clearSessionToken();
+      lockApplication();
+
+      const message = $("accessPinMessage");
+
+      if (message && error.message) {
+        showMessage(message, error.message);
+      }
+
+    } finally {
+      restoringSession = false;
+    }
   }
 
   // =========================================
   // PIN ACTIVATION
   // =========================================
 
-  const accessPinForm = $("accessPinForm");
-
-  accessPinForm?.addEventListener("submit", async (event) => {
+  $("accessPinForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
 
     if (isUnlocked) return;
@@ -264,9 +355,7 @@
     const submitButton = $("btnAccessPin");
     const message = $("accessPinMessage");
 
-    const pin = pinInput?.value
-      ?.trim()
-      .toUpperCase();
+    const pin = pinInput?.value?.trim().toUpperCase() || "";
 
     if (!pin) {
       showMessage(message, "Masukkan PIN akses terlebih dahulu.");
@@ -290,9 +379,12 @@
         deviceId
       });
 
-      if (!result.success) {
-        throw new Error(result.message || "PIN tidak valid.");
+      if (!result.sessionToken) {
+        throw new Error("Server tidak memberikan token sesi.");
       }
+
+      // Simpan token agar sesi bertahan setelah refresh dan tab baru.
+      saveSessionToken(result.sessionToken);
 
       showMessage(
         message,
@@ -300,14 +392,12 @@
         true
       );
 
-      unlockApplication();
+      unlockApplication(true);
 
     } catch (error) {
       showMessage(message, error.message);
 
-      if (pinInput) {
-        pinInput.focus();
-      }
+      if (pinInput) pinInput.focus();
 
     } finally {
       setButtonLoading(
@@ -371,9 +461,7 @@
     );
 
     try {
-      const data = await api("send-magiclink", {
-        email
-      });
+      const data = await api("send-magiclink", { email });
 
       pendingEmail = email;
 
@@ -423,10 +511,7 @@
     const rawLink = linkInput?.value?.trim() || "";
 
     if (!pendingEmail) {
-      showMessage(
-        result,
-        "Email belum dipilih. Silakan mulai dari awal."
-      );
+      showMessage(result, "Email belum dipilih. Silakan mulai dari awal.");
       goToStep(1);
       return;
     }
@@ -525,9 +610,7 @@
     document.body.style.overflow = "";
   }
 
-  $("btnCloseSuccess")?.addEventListener("click", () => {
-    hideSuccessModal();
-  });
+  $("btnCloseSuccess")?.addEventListener("click", hideSuccessModal);
 
   $("btnVerifyAnother")?.addEventListener("click", () => {
     hideSuccessModal();
@@ -574,29 +657,25 @@
   $("btnRestart")?.addEventListener("click", restartVerification);
 
   // =========================================
-  // BROWSER RESTORE / BACK-FORWARD CACHE
+  // BROWSER RESTORE / BF CACHE
   // =========================================
 
-  window.addEventListener("pageshow", (event) => {
-    // Jika halaman dipulihkan dari BFCache,
-    // minta PIN lagi.
-    if (event.persisted) {
-      lockApplication();
-      return;
-    }
-
-    // Pastikan halaman awal tetap terkunci.
+  window.addEventListener("pageshow", () => {
+    // Jangan mengunci ulang halaman yang sudah punya sesi.
+    // Validasi ulang token ke backend.
     if (!isUnlocked) {
-      lockApplication();
+      restoreSession();
     }
   });
 
   // =========================================
-  // INITIAL STATE
+  // INITIALIZATION
   // =========================================
 
-  // Selalu mulai dalam kondisi terkunci.
-  // Tidak ada status unlock yang disimpan ke storage.
+  // Kunci dulu untuk mencegah konten terlihat sebelum sesi diperiksa.
   lockApplication();
+
+  // Pulihkan sesi dari browser jika masih valid di backend.
+  restoreSession();
 
 })();
