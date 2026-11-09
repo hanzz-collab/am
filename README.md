@@ -1,22 +1,18 @@
-# AM Prem — Paper Book
+AMPReM FINAL UPDATE
 
-## Deploy to Netlify
-1. Upload this project folder to a Git repository and import it in Netlify.
-2. Build settings: publish directory `.`; functions directory `netlify/functions` (already set in `netlify.toml`).
-3. In **Site configuration → Environment variables**, set:
-   - `VERIFICATION_API_URL`: HTTPS endpoint for your authorized email-verification provider.
-   - `VERIFICATION_API_KEY`: optional bearer key if required by that provider.
-   - `ALLOWED_ORIGIN`: optional exact site origin, e.g. `https://your-site.netlify.app`.
-4. Redeploy after adding environment variables.
+File placement:
+- index.html              -> Netlify site root
+- style.css               -> Netlify site root (preserves old cream/olive CSS + gate/modal styles)
+- script.js               -> Netlify site root
+- admin.html              -> Netlify site root (open /admin.html)
+- netlify/functions/amprem.js -> Netlify Functions folder
 
-## Provider contract
-The configured provider receives a JSON POST:
-- Send: `{ "action": "send-magiclink", "email": "person@example.com" }`
-- Verify: `{ "action": "verify-account", "email": "person@example.com", "rawLink": "https://..." }`
+Before deploying:
+1. Keep AMPReM_ADMIN_KEY in Netlify Environment Variables.
+2. Ensure @netlify/blobs is available as a project dependency for the function.
+3. Deploy the complete folder/site, not just index.html.
+4. Open /admin.html, enter AMPReM_ADMIN_KEY, and generate a PIN.
+5. Test in a private/incognito browser with the generated PIN.
 
-It must respond with JSON such as `{ "success": true, "message": "..." }`.
-This project only relays the verification result. It does not request, store, expose, or forward authentication tokens and does not grant paid subscription entitlements. Use an official provider/API that you are authorized to operate.
-
-## Local preview
-Use Node 18+ and Netlify CLI:
-`npx netlify dev`
+Important security note:
+The device lock uses a persistent browser token stored in localStorage. This prevents ordinary PIN sharing across separate browser profiles/devices, but it is not hardware-backed device attestation; someone who copies browser storage may be able to copy the token too.
