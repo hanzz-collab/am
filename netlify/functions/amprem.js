@@ -1,4 +1,3 @@
-
 import crypto from "node:crypto";
 import { getStore } from "@netlify/blobs";
 
@@ -25,7 +24,9 @@ function sha256(value) {
 function safeEqual(a, b) {
   const left = Buffer.from(String(a || ""));
   const right = Buffer.from(String(b || ""));
-  return left.length === right.length && crypto.timingSafeEqual(left, right);
+
+  return left.length === right.length &&
+    crypto.timingSafeEqual(left, right);
 }
 
 function makePin() {
@@ -55,6 +56,7 @@ function getEncryptionKey() {
 function encryptPin(pin) {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", getEncryptionKey(), iv);
+
   const encrypted = Buffer.concat([
     cipher.update(pin, "utf8"),
     cipher.final(),
@@ -99,37 +101,95 @@ function getAccessStore() {
 
 function verifyAdmin(body) {
   const adminSecret = process.env.AMPREM_ADMIN_KEY;
-  return Boolean(adminSecret && safeEqual(body.adminKey, adminSecret));
+
+  return Boolean(
+    adminSecret &&
+    safeEqual(body.adminKey, adminSecret)
+  );
+}
+
+function isPinExpired(record) {
+  if (!record?.expiresAt) return false;
+
+  const expiry = Date.parse(record.expiresAt);
+
+  // Jika format expiry rusak, akses ditolak.
+  if (!Number.isFinite(expiry)) return true;
+
+  return Date.now() >= expiry;
 }
 
 function getPinStatus(record) {
   if (record.revoked) return "revoked";
+  if (isPinExpired(record)) return "expired";
   if (record.deviceHash) return "used";
+
   return "active";
 }
 
 function getSessionDays() {
   const configured = Number(process.env.AMPREM_SESSION_DAYS);
+
   return Number.isFinite(configured) && configured > 0
     ? Math.min(Math.floor(configured), 365)
     : DEFAULT_SESSION_DAYS;
 }
 
-async function createSession(store, pinKey, deviceHash) {
+function getPinKeys(pin) {
+  const normalized = pin.trim().toUpperCase();
+  const original = pin.trim();
+
+  return [
+    `pin:${sha256(normalized)}`,
+    `pin:${sha256(original)}`,
+    `pin:${sha256(original.toLowerCase())}`,
+  ];
+}
+
+async function findPinRecord(store, pin) {
+  const keys = [...new Set(getPinKeys(pin))];
+
+  for (const key of keys) {
+    const record = await store.get(key, { type: "json" });
+
+    if (record) {
+      return { key, record };
+    }
+  }
+
+  return null;
+}
+
+async function createSession(store, pinKey, deviceHash, pinRecord) {
   const token = crypto.randomBytes(32).toString("base64url");
   const now = Date.now();
-  const expiresAt = now + getSessionDays() * 24 * 60 * 60 * 1000;
 
-  await store.setJSON(`session:${sha256(token)}`, {
+  let expiresAt = now + getSessionDays() * 24 * 60 * 60 * 1000;
+
+  // Sesi tidak boleh melewati masa berlaku PIN.
+  if (pinRecord.expiresAt) {
+    const pinExpiry = Date.parse(pinRecord.expiresAt);
+
+    if (!Number.isFinite(pinExpiry) || pinExpiry <= now) {
+      throw new Error("PIN sudah kedaluwarsa.");
+    }
+
+    expiresAt = Math.min(expiresAt, pinExpiry);
+  }
+
+  const sessionData = {
     pinKey,
     deviceHash,
+    sessionVersion: Number(pinRecord.sessionVersion || 0),
     createdAt: new Date(now).toISOString(),
     expiresAt: new Date(expiresAt).toISOString(),
-  });
+  };
+
+  await store.setJSON(`session:${sha256(token)}`, sessionData);
 
   return {
     sessionToken: token,
-    expiresAt: new Date(expiresAt).toISOString(),
+    expiresAt: sessionData.expiresAt,
   };
 }
 
@@ -140,39 +200,90 @@ async function validateSession(store, token, deviceId) {
     token.length > 200 ||
     !validDeviceId(deviceId)
   ) {
-    return { valid: false, message: "Sesi tidak valid. Masukkan PIN kembali." };
+    return {
+      valid: false,
+      message: "Sesi tidak valid. Masukkan PIN kembali.",
+    };
   }
 
   const sessionKey = `session:${sha256(token)}`;
   const session = await store.get(sessionKey, { type: "json" });
 
   if (!session) {
-    return { valid: false, message: "Sesi tidak ditemukan. Masukkan PIN kembali." };
+    return {
+      valid: false,
+      message: "Sesi tidak ditemukan. Masukkan PIN kembali.",
+    };
   }
 
   const expiresAt = Date.parse(session.expiresAt || "");
 
   if (!Number.isFinite(expiresAt) || Date.now() >= expiresAt) {
     await store.delete(sessionKey);
-    return { valid: false, message: "Sesi sudah kedaluwarsa. Masukkan PIN kembali." };
+
+    return {
+      valid: false,
+      message: "Sesi sudah kedaluwarsa. Masukkan PIN kembali.",
+    };
   }
 
   const deviceHash = sha256(deviceId);
 
   if (!safeEqual(session.deviceHash, deviceHash)) {
-    return { valid: false, message: "Sesi tidak cocok dengan perangkat ini." };
+    return {
+      valid: false,
+      message: "Sesi tidak cocok dengan perangkat ini.",
+    };
   }
 
-  // Selalu cek PIN asal agar revoke atau penghapusan langsung membatalkan sesi.
+  // Periksa PIN asal setiap kali sesi digunakan.
   const pinRecord = await store.get(session.pinKey, { type: "json" });
 
-  if (!pinRecord || pinRecord.revoked) {
+  if (!pinRecord) {
     await store.delete(sessionKey);
-    return { valid: false, message: "Akses PIN sudah dinonaktifkan oleh admin." };
+
+    return {
+      valid: false,
+      message: "PIN sudah dihapus oleh admin.",
+    };
+  }
+
+  if (pinRecord.revoked) {
+    await store.delete(sessionKey);
+
+    return {
+      valid: false,
+      message: "Akses PIN sudah dinonaktifkan oleh admin.",
+    };
+  }
+
+  if (isPinExpired(pinRecord)) {
+    await store.delete(sessionKey);
+
+    return {
+      valid: false,
+      message: "PIN sudah kedaluwarsa. Hubungi admin.",
+    };
   }
 
   if (!safeEqual(pinRecord.deviceHash, deviceHash)) {
-    return { valid: false, message: "Perangkat tidak cocok dengan PIN ini." };
+    return {
+      valid: false,
+      message: "Perangkat tidak cocok dengan PIN ini.",
+    };
+  }
+
+  // Mencegah sesi lama hidup kembali setelah PIN direaktivasi.
+  const currentVersion = Number(pinRecord.sessionVersion || 0);
+  const sessionVersion = Number(session.sessionVersion || 0);
+
+  if (currentVersion !== sessionVersion) {
+    await store.delete(sessionKey);
+
+    return {
+      valid: false,
+      message: "Sesi lama sudah tidak berlaku. Masukkan PIN kembali.",
+    };
   }
 
   return {
@@ -210,13 +321,61 @@ export default async (request) => {
     const { action } = body;
     const store = getAccessStore();
 
+    // ==========================================
     // ADMIN: GENERATE PIN
+    // ==========================================
     if (action === "admin-generate-pin") {
       if (!verifyAdmin(body)) {
-        return response(401, { success: false, message: "Admin key tidak valid." });
+        return response(401, {
+          success: false,
+          message: "Admin key tidak valid.",
+        });
       }
 
+      // Pastikan encryption key sudah tersedia.
       encryptPin("AMPREM-CHECK");
+
+      const duration = String(body.duration || "30");
+      const now = Date.now();
+
+      let expiresAt = null;
+
+      if (duration === "unlimited") {
+        expiresAt = null;
+
+      } else if (duration === "custom") {
+        if (typeof body.expiresAt !== "string") {
+          return response(400, {
+            success: false,
+            message: "Tanggal kedaluwarsa custom belum diisi.",
+          });
+        }
+
+        const customExpiry = Date.parse(body.expiresAt);
+
+        if (!Number.isFinite(customExpiry) || customExpiry <= now) {
+          return response(400, {
+            success: false,
+            message: "Tanggal kedaluwarsa harus berada di masa depan.",
+          });
+        }
+
+        expiresAt = new Date(customExpiry).toISOString();
+
+      } else {
+        const days = Number(duration);
+
+        if (![1, 7, 30, 90].includes(days)) {
+          return response(400, {
+            success: false,
+            message: "Durasi PIN tidak valid.",
+          });
+        }
+
+        expiresAt = new Date(
+          now + days * 24 * 60 * 60 * 1000
+        ).toISOString();
+      }
 
       let pin;
       let key;
@@ -228,29 +387,39 @@ export default async (request) => {
         existing = await store.get(key, { type: "json" });
       } while (existing);
 
-      const createdAt = new Date().toISOString();
+      const createdAt = new Date(now).toISOString();
 
       await store.setJSON(key, {
         createdAt,
-        label: typeof body.label === "string" ? body.label.slice(0, 80) : "",
+        label: typeof body.label === "string"
+          ? body.label.slice(0, 80)
+          : "",
         encryptedPin: encryptPin(pin),
         deviceHash: null,
         activatedAt: null,
+        expiresAt,
         revoked: false,
+        sessionVersion: 0,
       });
 
       return response(200, {
         success: true,
         pin,
         createdAt,
+        expiresAt,
         message: "PIN berhasil dibuat.",
       });
     }
 
+    // ==========================================
     // ADMIN: LIST PINS
+    // ==========================================
     if (action === "admin-list-pins") {
       if (!verifyAdmin(body)) {
-        return response(401, { success: false, message: "Admin key tidak valid." });
+        return response(401, {
+          success: false,
+          message: "Admin key tidak valid.",
+        });
       }
 
       const { blobs } = await store.list({ prefix: "pin:" });
@@ -258,13 +427,18 @@ export default async (request) => {
       const records = await Promise.all(
         blobs.map(async (blob) => {
           const record = await store.get(blob.key, { type: "json" });
+
           if (!record) return null;
 
           let pin = null;
           let legacy = false;
 
           if (record.encryptedPin) {
-            pin = decryptPin(record.encryptedPin);
+            try {
+              pin = decryptPin(record.encryptedPin);
+            } catch {
+              legacy = true;
+            }
           } else {
             legacy = true;
           }
@@ -275,15 +449,19 @@ export default async (request) => {
             label: record.label || "",
             createdAt: record.createdAt || null,
             activatedAt: record.activatedAt || null,
+            expiresAt: record.expiresAt || null,
             revokedAt: record.revokedAt || null,
+            reactivatedAt: record.reactivatedAt || null,
             status: getPinStatus(record),
           };
         })
       );
 
-      const pins = records.filter(Boolean).sort(
-        (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
-      );
+      const pins = records
+        .filter(Boolean)
+        .sort((a, b) =>
+          new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+        );
 
       return response(200, {
         success: true,
@@ -291,61 +469,152 @@ export default async (request) => {
         active: pins.filter(x => x.status === "active").length,
         used: pins.filter(x => x.status === "used").length,
         revoked: pins.filter(x => x.status === "revoked").length,
+        expired: pins.filter(x => x.status === "expired").length,
         legacy: pins.filter(x => x.legacy).length,
         pins,
       });
     }
 
-    // ADMIN: REVOKE / DELETE PIN
-    if (action === "admin-revoke-pin" || action === "admin-delete-pin") {
+    // ==========================================
+    // ADMIN: REVOKE / REACTIVATE / DELETE PIN
+    // ==========================================
+    if (
+      action === "admin-revoke-pin" ||
+      action === "admin-reactivate-pin" ||
+      action === "admin-delete-pin"
+    ) {
       if (!verifyAdmin(body)) {
-        return response(401, { success: false, message: "Admin key tidak valid." });
+        return response(401, {
+          success: false,
+          message: "Admin key tidak valid.",
+        });
       }
 
       if (!validPin(body.pin)) {
-        return response(400, { success: false, message: "Format PIN tidak valid." });
+        return response(400, {
+          success: false,
+          message: "Format PIN tidak valid.",
+        });
       }
 
-      const pin = body.pin.trim().toUpperCase();
-      const key = `pin:${sha256(pin)}`;
-      const record = await store.get(key, { type: "json" });
+      const found = await findPinRecord(store, body.pin);
 
-      if (!record) {
-        return response(404, { success: false, message: "PIN tidak ditemukan." });
+      if (!found) {
+        return response(404, {
+          success: false,
+          message: "PIN tidak ditemukan.",
+        });
       }
 
+      const { key, record } = found;
+
+      // HAPUS PERMANEN
       if (action === "admin-delete-pin") {
         await store.delete(key);
-        return response(200, { success: true, message: "PIN berhasil dihapus permanen." });
+
+        return response(200, {
+          success: true,
+          message: "PIN berhasil dihapus permanen.",
+        });
       }
 
-      await store.setJSON(key, {
-        ...record,
-        revoked: true,
-        revokedAt: new Date().toISOString(),
-      });
+      // REVOKE
+      if (action === "admin-revoke-pin") {
+        if (record.revoked) {
+          return response(400, {
+            success: false,
+            message: "PIN ini sudah dinonaktifkan.",
+          });
+        }
 
-      return response(200, { success: true, message: "PIN berhasil dinonaktifkan." });
+        const now = new Date().toISOString();
+
+        await store.setJSON(key, {
+          ...record,
+          revoked: true,
+          revokedAt: now,
+          sessionVersion: Number(record.sessionVersion || 0) + 1,
+        });
+
+        return response(200, {
+          success: true,
+          message: "PIN berhasil dinonaktifkan. Semua sesi lama dibatalkan.",
+        });
+      }
+
+      // REACTIVATE
+      if (action === "admin-reactivate-pin") {
+        if (!record.revoked) {
+          return response(400, {
+            success: false,
+            message: "PIN ini tidak sedang dinonaktifkan.",
+          });
+        }
+
+        if (isPinExpired(record)) {
+          return response(400, {
+            success: false,
+            message: "PIN sudah kedaluwarsa dan tidak bisa diaktifkan kembali.",
+          });
+        }
+
+        const now = new Date().toISOString();
+
+        await store.setJSON(key, {
+          ...record,
+          revoked: false,
+          reactivatedAt: now,
+          sessionVersion: Number(record.sessionVersion || 0) + 1,
+        });
+
+        return response(200, {
+          success: true,
+          message: "PIN berhasil diaktifkan kembali. Pengguna harus memasukkan PIN ulang.",
+        });
+      }
     }
 
+    // ==========================================
     // USER: ACTIVATE PIN
+    // ==========================================
     if (action === "activate-pin") {
-      const pin = typeof body.pin === "string" ? body.pin.trim().toUpperCase() : "";
+      const pin = typeof body.pin === "string"
+        ? body.pin.trim().toUpperCase()
+        : "";
+
       const deviceId = body.deviceId;
 
       if (!validPin(pin)) {
-        return response(400, { success: false, message: "Format PIN tidak valid." });
+        return response(400, {
+          success: false,
+          message: "Format PIN tidak valid.",
+        });
       }
 
       if (!validDeviceId(deviceId)) {
-        return response(400, { success: false, message: "ID perangkat tidak valid. Muat ulang halaman." });
+        return response(400, {
+          success: false,
+          message: "ID perangkat tidak valid. Muat ulang halaman.",
+        });
       }
 
-      const pinKey = `pin:${sha256(pin)}`;
-      let record = await store.get(pinKey, { type: "json" });
+      const found = await findPinRecord(store, pin);
 
-      if (!record || record.revoked) {
-        return response(403, { success: false, message: "PIN tidak ditemukan atau sudah dinonaktifkan." });
+      if (!found || found.record.revoked) {
+        return response(403, {
+          success: false,
+          message: "PIN tidak ditemukan atau sudah dinonaktifkan.",
+        });
+      }
+
+      const { key: pinKey } = found;
+      let record = found.record;
+
+      if (isPinExpired(record)) {
+        return response(403, {
+          success: false,
+          message: "PIN sudah kedaluwarsa. Hubungi admin.",
+        });
       }
 
       const deviceHash = sha256(deviceId);
@@ -355,14 +624,24 @@ export default async (request) => {
           ...record,
           deviceHash,
           activatedAt: new Date().toISOString(),
+          sessionVersion: Number(record.sessionVersion || 0),
         };
 
         await store.setJSON(pinKey, record);
+
       } else if (!safeEqual(record.deviceHash, deviceHash)) {
-        return response(403, { success: false, message: "PIN ini sudah terikat ke perangkat lain." });
+        return response(403, {
+          success: false,
+          message: "PIN ini sudah terikat ke perangkat lain.",
+        });
       }
 
-      const session = await createSession(store, pinKey, deviceHash);
+      const session = await createSession(
+        store,
+        pinKey,
+        deviceHash,
+        record
+      );
 
       return response(200, {
         success: true,
@@ -371,9 +650,15 @@ export default async (request) => {
       });
     }
 
+    // ==========================================
     // USER: RESTORE / CHECK SESSION
+    // ==========================================
     if (action === "verify-session") {
-      const result = await validateSession(store, body.sessionToken, body.deviceId);
+      const result = await validateSession(
+        store,
+        body.sessionToken,
+        body.deviceId
+      );
 
       if (!result.valid) {
         return response(401, {
@@ -389,8 +674,13 @@ export default async (request) => {
       });
     }
 
+    // ==========================================
     // USER: AUTHENTICATE EMAIL ACTIONS
-    if (action === "send-magiclink" || action === "verify-account") {
+    // ==========================================
+    if (
+      action === "send-magiclink" ||
+      action === "verify-account"
+    ) {
       const auth = await validateSession(
         store,
         body.sessionToken,
@@ -406,7 +696,9 @@ export default async (request) => {
       }
     }
 
+    // ==========================================
     // SATRIAM EMAIL VERIFICATION
+    // ==========================================
     const { email, rawLink } = body;
 
     if (
@@ -414,7 +706,10 @@ export default async (request) => {
       typeof email !== "string" ||
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
     ) {
-      return response(400, { success: false, message: "Email tidak valid." });
+      return response(400, {
+        success: false,
+        message: "Email tidak valid.",
+      });
     }
 
     let endpoint;
@@ -422,10 +717,16 @@ export default async (request) => {
 
     if (action === "send-magiclink") {
       endpoint = "/api/satriam/send-link";
-      payload = { email: email.trim() };
+      payload = {
+        email: email.trim(),
+      };
+
     } else if (action === "verify-account") {
       if (!rawLink || typeof rawLink !== "string") {
-        return response(400, { success: false, message: "Magic link tidak ditemukan." });
+        return response(400, {
+          success: false,
+          message: "Magic link tidak ditemukan.",
+        });
       }
 
       let parsedLink;
@@ -433,33 +734,48 @@ export default async (request) => {
       try {
         parsedLink = new URL(rawLink);
       } catch {
-        return response(400, { success: false, message: "Format magic link tidak valid." });
+        return response(400, {
+          success: false,
+          message: "Format magic link tidak valid.",
+        });
       }
 
       if (parsedLink.protocol !== "https:") {
-        return response(400, { success: false, message: "Magic link harus menggunakan HTTPS." });
+        return response(400, {
+          success: false,
+          message: "Magic link harus menggunakan HTTPS.",
+        });
       }
 
       endpoint = "/api/satriam/verify-link";
+
       payload = {
         email: email.trim(),
         magicLink: rawLink.trim(),
       };
+
     } else {
-      return response(400, { success: false, message: "Action tidak dikenal." });
+      return response(400, {
+        success: false,
+        message: "Action tidak dikenal.",
+      });
     }
 
-    const upstream = await fetch(`${SATRIAM_BASE}${endpoint}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(25000),
-    });
+    const upstream = await fetch(
+      `${SATRIAM_BASE}${endpoint}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(25000),
+      }
+    );
 
     const rawResult = await upstream.text();
+
     let result;
 
     try {
@@ -468,7 +784,11 @@ export default async (request) => {
       result = { message: rawResult };
     }
 
-    if (!upstream.ok || result.success === false || result.ok === false) {
+    if (
+      !upstream.ok ||
+      result.success === false ||
+      result.ok === false
+    ) {
       return response(upstream.status || 502, {
         success: false,
         message: result.message || "Verifikasi dari Satriam gagal.",
