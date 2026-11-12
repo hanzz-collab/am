@@ -398,7 +398,7 @@
           <option value="30" selected>30 Hari</option>
           <option value="90">90 Hari</option>
           <option value="custom">Custom — Atur tanggal sendiri</option>
-          <option value="unlimited">Unlimited — Tanpa kedaluwarsa</option>
+          <option value="unlimited">Permanen — Tanpa kedaluwarsa</option>
         </select>
 
         <div class="custom-expiry" id="customExpiryBox">
@@ -859,7 +859,7 @@
 
         $("generatedExpiry").textContent = data.expiresAt
           ? `Berlaku sampai: ${formatDate(data.expiresAt)}`
-          : "Masa berlaku: Unlimited";
+          : "Masa berlaku: Permanen";
 
         generatedBox.style.display = "block";
 
