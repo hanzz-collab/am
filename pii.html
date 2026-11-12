@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="id">
 <head>
@@ -55,7 +54,8 @@
       color: #777468;
     }
 
-    .admin-card input {
+    .admin-card input,
+    .admin-card select {
       width: 100%;
       height: 47px;
       padding: 0 13px;
@@ -63,9 +63,12 @@
       background: #fffefa;
       color: #292820;
       outline: none;
+      font: 12px "DM Sans", sans-serif;
+      border-radius: 0;
     }
 
-    .admin-card input:focus {
+    .admin-card input:focus,
+    .admin-card select:focus {
       border-color: #53634f;
     }
 
@@ -124,9 +127,23 @@
       margin-top: 8px;
     }
 
+    .duration-hint {
+      margin-top: 8px !important;
+      font-size: 10px !important;
+      color: #999487 !important;
+    }
+
+    .custom-expiry {
+      display: none;
+    }
+
+    .custom-expiry.visible {
+      display: block;
+    }
+
     .stats {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 12px;
       margin: 22px 0;
     }
@@ -226,11 +243,12 @@
       display: flex;
       gap: 8px;
       margin-top: 14px;
+      flex-wrap: wrap;
     }
 
     .key-actions button {
       flex: 1;
-      min-width: 0;
+      min-width: 110px;
       min-height: 38px;
       font-size: 10px;
     }
@@ -251,6 +269,15 @@
 
     .revoke-button:hover {
       background: #efdcd6 !important;
+    }
+
+    .activate-button {
+      background: #e9eee5 !important;
+      color: #53634f !important;
+    }
+
+    .activate-button:hover {
+      background: #dce5d6 !important;
     }
 
     .status {
@@ -277,6 +304,11 @@
       color: #9a493d;
     }
 
+    .status-expired {
+      background: #eee8e5;
+      color: #87584c;
+    }
+
     .status-legacy {
       background: #eceae5;
       color: #777468;
@@ -295,6 +327,12 @@
       color: #999487 !important;
     }
 
+    @media (max-width: 700px) {
+      .stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
     @media (max-width: 600px) {
       .admin-wrap {
         margin-top: 20px;
@@ -302,10 +340,6 @@
 
       .admin-card {
         padding: 21px 17px;
-      }
-
-      .stats {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
       }
 
       .key-top {
@@ -357,6 +391,27 @@
           placeholder="Contoh: User order #001"
         >
 
+        <label for="pinDuration">DURASI AKSES PIN</label>
+        <select id="pinDuration">
+          <option value="1">1 Hari</option>
+          <option value="7">7 Hari</option>
+          <option value="30" selected>30 Hari</option>
+          <option value="90">90 Hari</option>
+          <option value="custom">Custom — Atur tanggal sendiri</option>
+          <option value="unlimited">Unlimited — Tanpa kedaluwarsa</option>
+        </select>
+
+        <div class="custom-expiry" id="customExpiryBox">
+          <label for="customExpiry">TANGGAL & JAM KEDALUWARSA</label>
+          <input
+            id="customExpiry"
+            type="datetime-local"
+          >
+          <p class="duration-hint">
+            PIN akan otomatis tidak bisa digunakan setelah waktu ini.
+          </p>
+        </div>
+
         <button
           type="submit"
           class="primary-button"
@@ -371,13 +426,12 @@
       <div class="generated" id="generatedBox">
         <span class="eyebrow">PIN BARU · BERHASIL DIBUAT</span>
         <strong id="generatedPin"></strong>
+        <p id="generatedExpiry"></p>
         <p>
           Simpan PIN ini. PIN akan terikat ke perangkat
           pertama yang mengaktifkannya.
         </p>
-        <button type="button" id="copyPin">
-          Salin PIN
-        </button>
+        <button type="button" id="copyPin">Salin PIN</button>
       </div>
     </section>
 
@@ -389,9 +443,7 @@
           <h2>Daftar Key.</h2>
         </div>
 
-        <button type="button" id="refreshButton">
-          ↻ Refresh
-        </button>
+        <button type="button" id="refreshButton">↻ Refresh</button>
       </div>
 
       <div class="stats">
@@ -414,9 +466,15 @@
           <span>Revoked</span>
           <strong id="revokedCount">—</strong>
         </div>
+
+        <div class="stat">
+          <span>Expired</span>
+          <strong id="expiredCount">—</strong>
+        </div>
       </div>
 
       <div class="admin-msg" id="listMessage"></div>
+
       <div class="key-list" id="keyList">
         <div class="empty-state">
           Masukkan admin key lalu tekan Refresh untuk melihat daftar PIN.
@@ -441,6 +499,9 @@
     const keyList = $("keyList");
     const generatedBox = $("generatedBox");
     const generatedPin = $("generatedPin");
+    const durationSelect = $("pinDuration");
+    const customExpiryBox = $("customExpiryBox");
+    const customExpiryInput = $("customExpiry");
 
     let lastGeneratedPin = "";
 
@@ -461,7 +522,13 @@
         })
       });
 
-      const data = await response.json();
+      let data;
+
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("Respons server tidak valid.");
+      }
 
       if (!response.ok || !data.success) {
         throw new Error(data.message || "Permintaan gagal.");
@@ -471,7 +538,7 @@
     }
 
     function formatDate(value) {
-      if (!value) return "Belum tersedia";
+      if (!value) return "Tidak ada batas waktu";
 
       const date = new Date(value);
 
@@ -488,6 +555,40 @@
     function setMessage(element, text, success = false) {
       element.textContent = text;
       element.style.color = success ? "#53634f" : "#9a493d";
+    }
+
+    function setMinimumCustomDate() {
+      const now = new Date();
+      now.setMinutes(now.getMinutes() + 1);
+
+      const local = new Date(
+        now.getTime() - now.getTimezoneOffset() * 60000
+      );
+
+      customExpiryInput.min = local.toISOString().slice(0, 16);
+    }
+
+    durationSelect.addEventListener("change", () => {
+      const isCustom = durationSelect.value === "custom";
+
+      customExpiryBox.classList.toggle("visible", isCustom);
+
+      if (isCustom) {
+        setMinimumCustomDate();
+      }
+    });
+
+    function createMeta(labelText, valueText) {
+      const wrapper = document.createElement("div");
+
+      const label = document.createElement("span");
+      label.textContent = labelText;
+
+      const value = document.createElement("strong");
+      value.textContent = valueText;
+
+      wrapper.append(label, value);
+      return wrapper;
     }
 
     function createKeyCard(item) {
@@ -515,7 +616,8 @@
       const statusNames = {
         active: "AKTIF",
         used: "DIGUNAKAN",
-        revoked: "REVOKED"
+        revoked: "REVOKED",
+        expired: "EXPIRED"
       };
 
       if (item.legacy) {
@@ -531,21 +633,14 @@
       const meta = document.createElement("div");
       meta.className = "key-meta";
 
-      const created = document.createElement("div");
-      const createdLabel = document.createElement("span");
-      createdLabel.textContent = "DIBUAT PADA";
-      const createdValue = document.createElement("strong");
-      createdValue.textContent = formatDate(item.createdAt);
-      created.append(createdLabel, createdValue);
-
-      const activated = document.createElement("div");
-      const activatedLabel = document.createElement("span");
-      activatedLabel.textContent = "DIAKTIFKAN PADA";
-      const activatedValue = document.createElement("strong");
-      activatedValue.textContent = formatDate(item.activatedAt);
-      activated.append(activatedLabel, activatedValue);
-
-      meta.append(created, activated);
+      meta.append(
+        createMeta("DIBUAT PADA", formatDate(item.createdAt)),
+        createMeta("DIAKTIFKAN PADA", formatDate(item.activatedAt)),
+        createMeta("KEDALUWARSA", item.expiresAt
+          ? formatDate(item.expiresAt)
+          : "Unlimited"),
+        createMeta("TERAKHIR DIREAKTIFKAN", formatDate(item.reactivatedAt))
+      );
 
       card.append(top, meta);
 
@@ -570,80 +665,105 @@
         actions.append(copy);
       }
 
-      if (item.pin && item.status !== "revoked") {
+      if (item.pin && item.status !== "revoked" && item.status !== "expired") {
         const revoke = document.createElement("button");
         revoke.type = "button";
         revoke.className = "revoke-button";
-        revoke.textContent = "Revoke";
+        revoke.textContent = "Nonaktifkan";
 
         revoke.addEventListener("click", async () => {
-          const confirmed = confirm(
-            `Nonaktifkan PIN ${item.pin}? Tindakan ini tidak dapat dibatalkan.`
-          );
-
-          if (!confirmed) return;
+          if (!confirm(`Nonaktifkan PIN ${item.pin}? Sesi pengguna akan langsung dibatalkan.`)) {
+            return;
+          }
 
           revoke.disabled = true;
           revoke.textContent = "Memproses...";
 
           try {
-            await api("admin-revoke-pin", {
-              pin: item.pin
-            });
+            await api("admin-revoke-pin", { pin: item.pin });
 
             setMessage(listMessage, "PIN berhasil dinonaktifkan.", true);
             await loadPins();
           } catch (error) {
             setMessage(listMessage, error.message);
             revoke.disabled = false;
-            revoke.textContent = "Revoke";
+            revoke.textContent = "Nonaktifkan";
           }
         });
 
         actions.append(revoke);
       }
 
+      if (item.pin && item.status === "revoked") {
+        const activate = document.createElement("button");
+        activate.type = "button";
+        activate.className = "activate-button";
+        activate.textContent = "Aktifkan Kembali";
+
+        activate.addEventListener("click", async () => {
+          if (!confirm(
+            `Aktifkan kembali PIN ${item.pin}?\n\nPengguna harus memasukkan PIN ulang. Masa berlaku lama tetap digunakan.`
+          )) {
+            return;
+          }
+
+          activate.disabled = true;
+          activate.textContent = "Mengaktifkan...";
+
+          try {
+            await api("admin-reactivate-pin", { pin: item.pin });
+
+            setMessage(
+              listMessage,
+              "PIN berhasil diaktifkan kembali. Pengguna harus memasukkan PIN ulang.",
+              true
+            );
+
+            await loadPins();
+          } catch (error) {
+            setMessage(listMessage, error.message);
+            activate.disabled = false;
+            activate.textContent = "Aktifkan Kembali";
+          }
+        });
+
+        actions.append(activate);
+      }
+
       if (item.pin) {
-  const del = document.createElement("button");
-  del.type = "button";
-  del.className = "revoke-button";
-  del.textContent = "Hapus Permanen";
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "revoke-button";
+        del.textContent = "Hapus Permanen";
 
-  del.addEventListener("click", async () => {
-    const confirmed = confirm(
-      `Yakin ingin menghapus PIN ${item.pin} secara permanen? Data PIN dan riwayatnya akan hilang.`
-    );
+        del.addEventListener("click", async () => {
+          if (!confirm(
+            `Yakin ingin menghapus PIN ${item.pin} secara permanen?\n\nData PIN tidak dapat dikembalikan.`
+          )) {
+            return;
+          }
 
-    if (!confirmed) return;
+          del.disabled = true;
+          del.textContent = "Menghapus...";
 
-    del.disabled = true;
-    del.textContent = "Menghapus...";
+          try {
+            await api("admin-delete-pin", { pin: item.pin });
 
-    try {
-      await api("admin-delete-pin", {
-        pin: item.pin
-      });
+            setMessage(listMessage, "PIN berhasil dihapus permanen.", true);
+            await loadPins();
+          } catch (error) {
+            setMessage(listMessage, error.message);
+            del.disabled = false;
+            del.textContent = "Hapus Permanen";
+          }
+        });
 
-      setMessage(
-        listMessage,
-        "PIN berhasil dihapus permanen.",
-        true
-      );
+        actions.append(del);
+      }
 
-      await loadPins();
-    } catch (error) {
-      setMessage(listMessage, error.message);
-      del.disabled = false;
-      del.textContent = "Hapus Permanen";
-    }
-  });
-
-  actions.append(del);
-}
-
-if (actions.children.length) {
-  card.append(actions);
-}
+      if (actions.children.length) {
+        card.append(actions);
+      }
 
       return card;
     }
@@ -664,12 +784,13 @@ if (actions.children.length) {
       try {
         const data = await api("admin-list-pins");
 
-        $("totalCount").textContent = data.total;
-        $("activeCount").textContent = data.active;
-        $("usedCount").textContent = data.used;
-        $("revokedCount").textContent = data.revoked;
+        $("totalCount").textContent = data.total ?? 0;
+        $("activeCount").textContent = data.active ?? 0;
+        $("usedCount").textContent = data.used ?? 0;
+        $("revokedCount").textContent = data.revoked ?? 0;
+        $("expiredCount").textContent = data.expired ?? 0;
 
-        if (!data.pins.length) {
+        if (!data.pins || !data.pins.length) {
           const empty = document.createElement("div");
           empty.className = "empty-state";
           empty.textContent = "Belum ada PIN yang dibuat.";
@@ -683,7 +804,7 @@ if (actions.children.length) {
 
         setMessage(
           listMessage,
-          `${data.total} key ditemukan. ${data.legacy} PIN lama tidak dapat ditampilkan.`,
+          `${data.total} key ditemukan. ${data.legacy || 0} PIN lama tidak dapat ditampilkan.`,
           true
         );
 
@@ -710,15 +831,39 @@ if (actions.children.length) {
       generatedBox.style.display = "none";
 
       try {
+        const duration = durationSelect.value;
+        let expiresAt = null;
+
+        if (duration === "custom") {
+          if (!customExpiryInput.value) {
+            throw new Error("Pilih tanggal dan jam kedaluwarsa terlebih dahulu.");
+          }
+
+          const customDate = new Date(customExpiryInput.value);
+
+          if (!Number.isFinite(customDate.getTime()) || customDate.getTime() <= Date.now()) {
+            throw new Error("Tanggal kedaluwarsa harus berada di masa depan.");
+          }
+
+          expiresAt = customDate.toISOString();
+        }
+
         const data = await api("admin-generate-pin", {
-          label: $("pinLabel").value
+          label: $("pinLabel").value,
+          duration,
+          expiresAt
         });
 
         lastGeneratedPin = data.pin;
         generatedPin.textContent = data.pin;
+
+        $("generatedExpiry").textContent = data.expiresAt
+          ? `Berlaku sampai: ${formatDate(data.expiresAt)}`
+          : "Masa berlaku: Unlimited";
+
         generatedBox.style.display = "block";
 
-        setMessage(message, data.message, true);
+        setMessage(message, data.message || "PIN berhasil dibuat.", true);
 
         $("pinLabel").value = "";
 
@@ -746,7 +891,6 @@ if (actions.children.length) {
 
     $("refreshButton").addEventListener("click", loadPins);
 
-    // Muat otomatis setelah admin key diisi dan input kehilangan fokus.
     adminKeyInput.addEventListener("change", () => {
       if (getAdminKey()) loadPins();
     });
